@@ -1,0 +1,6 @@
+{
+  "name": "Task Assignment Assistant",
+  "description": "A web application to help assign tasks to individuals based on their skills and interests, using AI for suggestions.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}

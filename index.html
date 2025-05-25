@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Task Assignment Assistant</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              primary: 'rgb(var(--color-primary) / <alpha-value>)',
+              secondary: 'rgb(var(--color-secondary) / <alpha-value>)',
+              accent: 'rgb(var(--color-accent) / <alpha-value>)',
+              neutral: 'rgb(var(--color-neutral) / <alpha-value>)',
+              bground: 'rgb(var(--color-bground) / <alpha-value>)',
+              surface: 'rgb(var(--color-surface) / <alpha-value>)',
+              textlight: 'rgb(var(--color-textlight) / <alpha-value>)',
+              texthighlight: 'rgb(var(--color-texthighlight) / <alpha-value>)',
+              danger: 'rgb(var(--color-danger) / <alpha-value>)',
+              warning: 'rgb(var(--color-warning) / <alpha-value>)',
+              info: 'rgb(var(--color-info) / <alpha-value>)',
+              success: 'rgb(var(--color-success) / <alpha-value>)',
+              authFormBg: '#F0F0F0', // Light gray for input fields as per image
+              authButton: '#A7DBD8', // Light teal/aqua for buttons
+              authButtonHover: '#8CD0C7', // Slightly darker teal/aqua for hover
+              authLink: '#E06377', // Reddish-pink for links
+              authPageBg: '#D6E6F2', // Pale blue for overall page background
+            }
+          }
+        }
+      }
+    </script>
+    <style type="text/tailwindcss">
+      @layer base {
+        :root {
+          --color-primary: 59 130 246; /* blue-500 */
+          --color-secondary: 34 197 94; /* green-500 */
+          --color-accent: 234 179 8; /* yellow-500 */
+          --color-neutral: 107 114 128; /* gray-500 */
+          --color-bground: 243 244 246; /* gray-100 */
+          --color-surface: 255 255 255; /* white */
+          --color-textlight: 17 24 39; /* gray-900 */
+          --color-texthighlight: 96 165 250; /* blue-400 */
+          --color-danger: 239 68 68; /* red-500 */
+          --color-warning: 245 158 11; /* amber-500 */
+          --color-info: 59 130 246; /* blue-500 */ /* Using primary for info for now */
+          --color-success: 22 163 74; /* green-600 */
+        }
+        body {
+          @apply font-sans; /* Default background will be white or authPageBg depending on context */
+        }
+        /* Default input styles for the main app (logged-in state) */
+        .main-app-scope input, .main-app-scope textarea, .main-app-scope select {
+            @apply bg-surface text-textlight border-neutral focus:ring-primary focus:border-primary;
+            color-scheme: light; 
+        }
+        .main-app-scope input::placeholder, .main-app-scope textarea::placeholder {
+            @apply text-neutral;
+        }
+        .main-app-scope select {
+          @apply appearance-none bg-surface bg-no-repeat;
+          background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+          background-position: right 0.5rem center;
+          background-size: 1.5em 1.5em;
+          padding-right: 2.5rem; 
+        }
+      }
+      @layer components {
+        .btn-primary {
+          @apply py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-colors;
+        }
+        .btn-secondary {
+           @apply py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-secondary hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-secondary transition-colors;
+        }
+        .btn-accent {
+           @apply py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-accent hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent transition-colors;
+        }
+        .btn-danger {
+           @apply py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-danger hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-danger transition-colors;
+        }
+        .btn-info {
+           @apply py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-info hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-info transition-colors;
+        }
+         .btn-success {
+           @apply py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-success hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-success transition-colors;
+        }
+        .btn-neutral {
+           @apply py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-colors;
+        }
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.1.0",
+    "react/": "https://esm.sh/react@^19.1.0/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.0.1",
+    "react-dom/": "https://esm.sh/react-dom@^19.1.0/"
+  }
+}
+</script>
+</head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html><link rel="stylesheet" href="index.css">
+<script src="index.tsx" type="module"></script>
