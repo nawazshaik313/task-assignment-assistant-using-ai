@@ -17,11 +17,13 @@ export default defineConfig(({ mode }) => {
     server: {
       host: '0.0.0.0',
       port: Number(process.env.PORT) || 5173,
-      allowedHosts: 'all', // ✅ Allows any incoming domain (e.g., Render URL)
+
+      // ✅ Allow your Render domain explicitly
+      allowedHosts: ['task-assignment-assistant-using-ai.onrender.com']
     },
     preview: {
-      host: '0.0.0.0',  
-      port: Number(process.env.PORT) || 4173,
-    },
+      host: '0.0.0.0',
+      port: Number(process.env.PORT) || 4173
+    }
   };
 });
