@@ -17,6 +17,7 @@ export default defineConfig(({ mode }) => {
     server: {
       host: '0.0.0.0', // ✅ Needed for deployment on Render
       port: parseInt(process.env.PORT) || 5173, // ✅ Use Render's PORT if set
+      allowedHosts: ['task-assignment-assistant-using-ai.onrender.com'],
     },
   };
 });
