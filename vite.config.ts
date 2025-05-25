@@ -20,7 +20,7 @@ export default defineConfig(({ mode }) => {
       allowedHosts: 'all', // ✅ Allows any incoming domain (e.g., Render URL)
     },
     preview: {
-      host: '0.0.0.0',
+      host: '0.0.0.0',  
       port: Number(process.env.PORT) || 4173,
     },
   };
