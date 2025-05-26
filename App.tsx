@@ -41,7 +41,8 @@ role: 'user',
 setUsers(prev => [...prev, newUser]);
 setPendingUsers(prev => prev.filter(pu => pu.id !== id));
 await sendApprovalEmail(approvingUser.email, approvingUser.displayName); // ✅ real email
-setSuccessMessage(User ${approvingUser.displayName} approved.);
+setSuccessMessage(`User ${approvingUser.displayName} approved.`);
+
 setShowSuccessModal(true);
 }
 };
