@@ -6,6 +6,233 @@ import { getAssignmentSuggestion } from './services/geminiService';
 import LoadingSpinner from './components/LoadingSpinner';
 import { UsersIcon, ClipboardListIcon, LightBulbIcon, CheckCircleIcon, TrashIcon, PlusCircleIcon, KeyIcon, BriefcaseIcon, LogoutIcon, UserCircleIcon } from './components/Icons';
 import PreRegistrationFormPage from './components/PreRegistrationFormPage';
+import React, { useState } from 'react';
+import { Page, User, PendingUser } from './types';
+import PreRegistrationFormPage from './components/PreRegistrationFormPage';
+import FormInput from './components/FormInput';
+import Modal from './components/Modal';
+import { sendApprovalEmail } from './utils/emailService';
+import AdminLoginPage from './components/AdminLoginPage';
+
+const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
+const [searchTerm, setSearchTerm] = useState('');
+if (page === 'adminLogin') {
+  const filteredPendingUsers = pendingUsers.filter(user =>
+user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+user.uniqueId.toLowerCase().includes(searchTerm.toLowerCase()) ||
+user.displayName.toLowerCase().includes(searchTerm.toLowerCase())
+);
+return <AdminLoginPage onLogin={() => { setIsAdminLoggedIn(true); setPage('userManagement'); }} />;
+}
+<button onClick={() => navigateTo('adminLogin')} className="bg-orange-600 text-white px-4 py-2 rounded">
+Admin Login
+</button>
+const handleApproveUser = async (id: string) => {
+const approvingUser = pendingUsers.find(pu => pu.id === id);
+if (approvingUser) {
+const newUser: User = {
+id: Date.now().toString(),
+email: approvingUser.email,
+uniqueId: approvingUser.uniqueId,
+displayName: approvingUser.displayName,
+password: approvingUser.password,
+role: 'user',
+};
+setUsers(prev => [...prev, newUser]);
+setPendingUsers(prev => prev.filter(pu => pu.id !== id));
+await sendApprovalEmail(approvingUser.email, approvingUser.displayName); // ✅ real email
+setSuccessMessage(User ${approvingUser.displayName} approved.);
+setShowSuccessModal(true);
+}
+};
+const App: React.FC = () => {
+  const [page, setPage] = useState<Page>('login');
+  const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  const [showSuccessModal, setShowSuccessModal] = useState<boolean>(false);
+
+  const [preRegistrationForm, setPreRegistrationForm] = useState({
+    email: '',
+    uniqueId: '',
+    displayName: '',
+    password: '',
+    confirmPassword: '',
+    referringAdminId: '',
+    referringAdminDisplayName: '',
+    isReferralLinkValid: false,
+  });
+
+  const [users, setUsers] = useState<User[]>([]);
+  const [pendingUsers, setPendingUsers] = useState<PendingUser[]>([]);
+
+  const clearMessages = () => {
+    setError(null);
+    setSuccessMessage(null);
+    setInfoMessage(null);
+  };
+
+  const navigateTo = (targetPage: Page) => {
+    clearMessages();
+    setPage(targetPage);
+  };
+
+  const handlePreRegistrationSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    clearMessages();
+
+    const {
+      email,
+      uniqueId,
+      displayName,
+      password,
+      confirmPassword,
+      referringAdminId,
+    } = preRegistrationForm;
+
+    if (!preRegistrationForm.isReferralLinkValid || !referringAdminId) {
+      setError('Invalid pre-registration attempt. Please use a valid link from an administrator.');
+      return;
+    }
+
+    if (!email || !uniqueId || !displayName || !password || !confirmPassword) {
+      setError('All fields are required.');
+      return;
+    }
+
+    if (!/\S+@\S+\.\S+/.test(email)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+
+    if (
+      users.some(u => u.uniqueId === uniqueId || u.email === email) ||
+      pendingUsers.some(pu => pu.uniqueId === uniqueId)
+    ) {
+      setError('This System ID or Email is already used or pending approval.');
+      return;
+    }
+
+    const newPendingUser: PendingUser = {
+      id: Date.now().toString(),
+      email,
+      uniqueId,
+      displayName,
+      password,
+      referringAdminId,
+      submissionDate: new Date().toISOString(),
+    };
+
+    setPendingUsers(prev => [...prev, newPendingUser]);
+    setPreRegistrationForm({
+      email: '',
+      uniqueId: '',
+      displayName: '',
+      password: '',
+      confirmPassword: '',
+      referringAdminId: '',
+      referringAdminDisplayName: '',
+      isReferralLinkValid: false,
+    });
+    setSuccessMessage('Your registration request was submitted. Await admin approval.');
+    setShowSuccessModal(true);
+    navigateTo('login');
+  };
+
+  const handleApproveUser = (id: string) => {
+    const approvingUser = pendingUsers.find(pu => pu.id === id);
+    if (approvingUser) {
+      const newUser: User = {
+        id: Date.now().toString(),
+        email: approvingUser.email,
+        uniqueId: approvingUser.uniqueId,
+        displayName: approvingUser.displayName,
+        password: approvingUser.password,
+        role: 'user',
+      };
+      setUsers(prev => [...prev, newUser]);
+      setPendingUsers(prev => prev.filter(pu => pu.id !== id));
+      setSuccessMessage(`User ${approvingUser.displayName} approved successfully.`);
+      setShowSuccessModal(true);
+      // Simulate email notification (log)
+      console.log(`📧 Email sent to ${approvingUser.email}: Your account has been approved.`);
+    }
+  };
+
+  const handleRejectUser = (id: string) => {
+    const rejectingUser = pendingUsers.find(pu => pu.id === id);
+    setPendingUsers(prev => prev.filter(pu => pu.id !== id));
+    setSuccessMessage(`User ${rejectingUser?.displayName || ''} rejected.`);
+    setShowSuccessModal(true);
+  };
+
+  if (page === 'preRegister') {
+    return (
+      <PreRegistrationFormPage
+        formState={preRegistrationForm}
+        setFormState={setPreRegistrationForm}
+        onSubmit={handlePreRegistrationSubmit}
+        error={error}
+        successMessage={successMessage}
+        infoMessage={infoMessage}
+        clearMessages={clearMessages}
+        navigateToLogin={() => navigateTo('login')}
+      />
+    );
+  }
+
+  if (isAdminLoggedIn && page === 'userManagement') {
+return (
+<div className="p-4">
+<h2 className="text-xl font-bold mb-4">Pending User Approvals</h2>
+<input
+type="text"
+placeholder="Search by email, ID, or name"
+value={searchTerm}
+onChange={e => setSearchTerm(e.target.value)}
+className="mb-4 border p-2 w-full"
+/>
+{filteredPendingUsers.length === 0 ? (
+<p>No matching users found.</p>
+) : (
+<ul className="space-y-4">
+{filteredPendingUsers.map(user => (
+<li key={user.id} className="border p-4 rounded-md bg-white shadow-sm">
+<p><strong>Email:</strong> {user.email}</p>
+<p><strong>System ID:</strong> {user.uniqueId}</p>
+<p><strong>Display Name:</strong> {user.displayName}</p>
+<div className="flex gap-2 mt-2">
+<button
+onClick={() => handleApproveUser(user.id)}
+className="bg-green-600 text-white px-3 py-1 rounded"
+>
+Approve
+</button>
+<button
+onClick={() => handleRejectUser(user.id)}
+className="bg-red-500 text-white px-3 py-1 rounded"
+>
+Reject
+</button>
+</div>
+</li>
+))}
+</ul>
+)}
+</div>
+);
+}
+
+  return <div>{/* Render other pages here */}</div>;
+};
+
+export default App;
+
 
 // --- START OF NEW AUTH FORM COMPONENTS ---
 const AuthFormInput: React.FC<React.InputHTMLAttributes<HTMLInputElement> & { id: string; 'aria-label': string }> = ({ id, ...props }) => (
