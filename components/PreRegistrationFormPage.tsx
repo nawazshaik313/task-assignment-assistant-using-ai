@@ -1,10 +1,12 @@
-
 import React from 'react';
 import { Page } from '../types'; // Adjust path as needed
 
 interface PreRegistrationFormState {
+  email: string;
   uniqueId: string;
   displayName: string;
+  password: string;
+  confirmPassword: string;
   referringAdminId: string;
   referringAdminDisplayName: string;
   isReferralLinkValid: boolean;
@@ -36,7 +38,6 @@ const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = ({
     setFormState(prev => ({ ...prev, [name]: value }));
   };
 
-  // Display messages at the top of this specific page as well
   const UIMessages: React.FC = () => (
     <>
       {error && <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-md shadow-lg w-full" role="alert"><p><strong className="font-bold">Error:</strong> {error}</p><button onClick={clearMessages} className="ml-2 text-sm font-bold">X</button></div>}
@@ -45,7 +46,7 @@ const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = ({
     </>
   );
 
-  if (!formState.isReferralLinkValid && !successMessage) { // Don't show invalid link if success message is present (after submission)
+  if (!formState.isReferralLinkValid && !successMessage) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-authPageBg p-4">
         <div className="bg-surface p-8 rounded-xl shadow-2xl w-full max-w-lg text-center">
@@ -65,15 +66,14 @@ const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = ({
       </div>
     );
   }
-  
-  // If successful submission, show message and login button
+
   if (successMessage) {
-     return (
+    return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-authPageBg p-4">
         <div className="bg-surface p-8 rounded-xl shadow-2xl w-full max-w-lg text-center">
           <UIMessages />
           <h2 className="text-2xl font-bold text-textlight mb-4">Pre-registration Submitted</h2>
-           <button
+          <button
             onClick={navigateToLogin}
             className="w-full py-3 px-4 bg-authButton hover:bg-authButtonHover text-textlight font-semibold rounded-md shadow-sm transition-colors text-sm"
           >
@@ -87,7 +87,6 @@ const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = ({
     );
   }
 
-
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-authPageBg p-4">
       <div className="bg-surface p-8 rounded-xl shadow-2xl w-full max-w-lg">
@@ -95,11 +94,25 @@ const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = ({
         <h2 className="text-center text-3xl font-bold text-textlight mb-2">User Pre-registration</h2>
         <p className="text-center text-sm text-neutral mb-6">
           You've been invited by <strong>{formState.referringAdminDisplayName || 'an administrator'}</strong>.
-          Please provide your desired system identifier and display name.
+          Please complete your registration.
         </p>
         <form onSubmit={onSubmit} className="space-y-5">
           <div>
-            <label htmlFor="preRegUniqueId" className="block text-sm font-medium text-textlight">Desired System ID / Username</label>
+            <label htmlFor="email" className="block text-sm font-medium text-textlight">Email Address (Login)</label>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              value={formState.email}
+              onChange={handleInputChange}
+              required
+              className="mt-1 w-full p-3 bg-authFormBg border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm text-textlight placeholder-neutral"
+              placeholder="e.g., jane@example.com"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="preRegUniqueId" className="block text-sm font-medium text-textlight">System ID / Username</label>
             <input
               id="preRegUniqueId"
               name="uniqueId"
@@ -109,12 +122,11 @@ const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = ({
               required
               className="mt-1 w-full p-3 bg-authFormBg border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm text-textlight placeholder-neutral"
               placeholder="e.g., jdoe23"
-              aria-describedby="uniqueIdHelp"
             />
-            <p id="uniqueIdHelp" className="mt-1 text-xs text-neutral">This will be your unique identifier in the system.</p>
           </div>
+
           <div>
-            <label htmlFor="preRegDisplayName" className="block text-sm font-medium text-textlight">Your Full Name (Display Name)</label>
+            <label htmlFor="preRegDisplayName" className="block text-sm font-medium text-textlight">Display Name</label>
             <input
               id="preRegDisplayName"
               name="displayName"
@@ -126,6 +138,35 @@ const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = ({
               placeholder="e.g., Jane Doe"
             />
           </div>
+
+          <div>
+            <label htmlFor="password" className="block text-sm font-medium text-textlight">System Password</label>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              value={formState.password}
+              onChange={handleInputChange}
+              required
+              className="mt-1 w-full p-3 bg-authFormBg border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm text-textlight placeholder-neutral"
+              placeholder="Set a password for the user"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="confirmPassword" className="block text-sm font-medium text-textlight">Confirm System Password</label>
+            <input
+              id="confirmPassword"
+              name="confirmPassword"
+              type="password"
+              value={formState.confirmPassword}
+              onChange={handleInputChange}
+              required
+              className="mt-1 w-full p-3 bg-authFormBg border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm text-textlight placeholder-neutral"
+              placeholder="Confirm password"
+            />
+          </div>
+
           <button
             type="submit"
             className="w-full py-3 px-4 bg-authButton hover:bg-authButtonHover text-textlight font-semibold rounded-md shadow-sm transition-colors text-sm"
@@ -133,6 +174,7 @@ const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = ({
             Submit Pre-registration
           </button>
         </form>
+
         <p className="text-center text-sm text-textlight mt-6">
           Already have an account or submitted?{' '}
           <button
@@ -144,8 +186,9 @@ const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = ({
           </button>
         </p>
       </div>
+
       <footer className="text-center py-6 text-sm text-neutral mt-auto">
-        <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by SHAIK MOHAMMMED NAWAZ.</p>
+        <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by SHAIK MOHAMMED NAWAZ.</p>
       </footer>
     </div>
   );

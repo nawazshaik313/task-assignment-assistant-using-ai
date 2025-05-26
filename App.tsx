@@ -51,14 +51,17 @@ const FormSelect: React.FC<React.SelectHTMLAttributes<HTMLSelectElement> & { lab
     </select>
   </div>
 );
-
 const initialPreRegistrationFormState = {
-  uniqueId: '', 
+  email: '',
+  uniqueId: '',
   displayName: '',
-  referringAdminId: '', 
-  referringAdminDisplayName: '', 
-  isReferralLinkValid: false, 
+  password: '',
+  confirmPassword: '',
+  referringAdminId: '',
+  referringAdminDisplayName: '',
+  isReferralLinkValid: false,
 };
+
 
 const initialAdminRegistrationState = { // For the old admin flow (if kept separately)
   email: '',
