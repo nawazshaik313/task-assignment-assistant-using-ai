@@ -25,10 +25,11 @@ children: React.ReactNode;
 }
 
 = ({ id, children, ...props }) => (
-<select
+<select>
 id={id}
 {...props}
 className="w-full p-3 bg-authFormBg border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm text-textlight"
+
 
 {children}
 </select> );
