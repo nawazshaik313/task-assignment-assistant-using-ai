@@ -146,28 +146,34 @@ const App: React.FC = () => {
     navigateTo('login');
   };
 
-  const handleApproveUser = (id: string) => {
-    const approvingUser = pendingUsers.find(pu => pu.id === id);
-    if (approvingUser) {
-      const newUser: User = {
-        id: Date.now().toString(),
-        email: approvingUser.email,
-        uniqueId: approvingUser.uniqueId,
-        displayName: approvingUser.displayName,
-        password: approvingUser.password,
-        role: 'user',
-        
-      };
-      setUsers(prev => [...prev, newUser]);
-      setPendingUsers(prev => prev.filter(pu => pu.id !== id));
-      setSuccessMessage(`User ${approvingUser.displayName} approved successfully.`);
-      setShowSuccessModal(true);
-      // Simulate email notification (log)
-      console.log(`📧 Email sent to ${approvingUser.email}: Your account has been approved.`);
-      await sendApprovalEmail(approvingUser.email, approvingUser.displayName);
+  const handleApproveUser = async (id: string) => {
+  const approvingUser = pendingUsers.find(pu => pu.id === id);
+  if (approvingUser) {
+    const newUser: User = {
+      id: Date.now().toString(),
+      email: approvingUser.email,
+      uniqueId: approvingUser.uniqueId,
+      displayName: approvingUser.displayName,
+      password: approvingUser.password,
+      role: 'user',
+    };
 
+    setUsers(prev => [...prev, newUser]);
+    setPendingUsers(prev => prev.filter(pu => pu.id !== id));
+
+    // ✅ Await email notification
+    try {
+      await sendApprovalEmail(approvingUser.email, approvingUser.displayName);
+      setSuccessMessage(`User ${approvingUser.displayName} approved.`);
+    } catch (err) {
+      console.error('❌ Failed to send approval email:', err);
+      setError('User approved, but email notification failed.');
     }
-  };
+
+    setShowSuccessModal(true);
+  }
+};
+
 
   const handleRejectUser = (id: string) => {
     const rejectingUser = pendingUsers.find(pu => pu.id === id);
