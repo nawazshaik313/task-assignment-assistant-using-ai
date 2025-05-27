@@ -24,10 +24,10 @@ id={id}
 {...props}
 className="w-full p-3 bg-authFormBg border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm text-textlight"
 
-Copy
-Edit
+
 {children}
-</select> );
+</select> 
+);
 const FormInput: React.FC<React.InputHTMLAttributes<HTMLInputElement> & { label: string; id: string }> = ({ label, id, ...props }) => (
 
 <div> <label htmlFor={id} className="block text-sm font-medium text-textlight">{label}</label> <input id={id} {...props} className="mt-1 block w-full px-3 py-2 border border-neutral rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm bg-surface text-textlight" /> </div> );
