@@ -17,17 +17,26 @@ id={id}
 className="w-full p-3 bg-authFormBg border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm text-textlight placeholder-neutral"
 />
 );
-const AuthFormSelect: React.FC<React.SelectHTMLAttributes<HTMLSelectElement> & { id: string; 'aria-label': string; children: React.ReactNode }> = ({ id, children, ...props }) => (
+const AuthFormSelect: React.FC<
+React.SelectHTMLAttributes<HTMLSelectElement> & {
+id: string;
+'aria-label': string;
+children: React.ReactNode;
+}
+
+= ({ id, children, ...props }) => (
 <select
 id={id}
 {...props}
-className="w-full p-3 bg-authFormBg border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm text-textlight"{children}
+className="w-full p-3 bg-authFormBg border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm text-textlight"
+
+{children}
 </select> );
-const FormInput: React.FC<React.InputHTMLAttributes<HTMLInputElement> & { label: string; id: string }> = ({
-label,
-id,
-...props
-}) => (
+
+const FormInput: React.FC<
+React.InputHTMLAttributes<HTMLInputElement> & { label: string; id: string }
+
+= ({ label, id, ...props }) => (
 
 <div> <label htmlFor={id} className="block text-sm font-medium text-textlight"> {label} </label> <input id={id} {...props} className="mt-1 block w-full px-3 py-2 border border-neutral rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm bg-surface text-textlight" /> </div> );
 const FormTextarea: React.FC<
