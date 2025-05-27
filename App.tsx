@@ -11,14 +11,12 @@ import { sendApprovalEmail } from './utils/emailService'; // ✅ updated path
 
 // --- FORM COMPONENTS ---
 const AuthFormInput: React.FC<React.InputHTMLAttributes<HTMLInputElement> & { id: string; 'aria-label': string }> = ({ id, ...props }) => // --- FORM COMPONENTS ---
-const AuthFormInput: React.FC<React.InputHTMLAttributes<HTMLInputElement> & { id: string; 'aria-label': string }> = ({ id, ...props }) => (
 <input
 id={id}
 {...props}
 className="w-full p-3 bg-authFormBg border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm text-textlight placeholder-neutral"
 />
 );
-
 const AuthFormSelect: React.FC<
 React.SelectHTMLAttributes<HTMLSelectElement> & {
 id: string;
