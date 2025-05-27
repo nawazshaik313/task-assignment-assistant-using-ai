@@ -291,35 +291,6 @@ const initialAdminRegistrationState = { // For the old admin flow (if kept separ
 };
 
 
-export const App = (): JSX.Element => {
-  const [currentPage, _setCurrentPageInternal] = useState<Page>(Page.Login); 
-  const [users, setUsers] = useLocalStorage<User[]>('task-assign-users', []);
-  const [pendingUsers, setPendingUsers] = useLocalStorage<PendingUser[]>('task-assign-pending-users', []);
-  const [currentUser, setCurrentUser] = useLocalStorage<User | null>('task-assign-currentUser', null);
-  const [tasks, setTasks] = useLocalStorage<Task[]>('task-assign-tasks', []);
-  const [programs, setPrograms] = useLocalStorage<Program[]>('task-assign-programs', []);
-  const [assignments, setAssignments] = useLocalStorage<Assignment[]>('task-assign-assignments', []);
-  const [adminLogs, setAdminLogs] = useLocalStorage<AdminLogEntry[]>('task-assign-adminLogs', []);
-
-  const [authView, setAuthView] = useState<'login' | 'register'>('login');
-  const [newLoginForm, setNewLoginForm] = useState({ email: '', password: '' });
-  const [newRegistrationForm, setNewRegistrationForm] = useState({
-    name: '',
-    email: '',
-    password: '',
-    confirmPassword: '',
-    role: 'user' as Role,
-  });
-  
-  const [adminRegistrationForm, setAdminRegistrationForm] = useState(initialAdminRegistrationState);
-  const [preRegistrationForm, setPreRegistrationForm] = useLocalStorage('task-assign-preRegistrationForm',initialPreRegistrationFormState);
-  
-  const initialUserFormData = { 
-      email: '', uniqueId: '', password: '', confirmPassword: '', 
-      displayName: '', position: '', userInterests: '', 
-      phone: '', notificationPreference: 'none' as NotificationPreference,
-      role: 'user' as Role, referringAdminId: ''
-  };
   const [userForm, setUserForm] = useState<typeof initialUserFormData>(initialUserFormData); 
   const [editingUserId, setEditingUserId] = useState<string | null>(null); 
   const [approvingPendingUser, setApprovingPendingUser] = useState<PendingUser | null>(null); 
