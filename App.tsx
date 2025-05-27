@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { Page, User, Role, Task, Assignment, Program, GeminiSuggestion, NotificationPreference, AssignmentStatus, PendingUser, AdminLogEntry } from './types';
 import useLocalStorage from './hooks/useLocalStorage';
@@ -6,13 +5,11 @@ import { getAssignmentSuggestion } from './services/geminiService';
 import LoadingSpinner from './components/LoadingSpinner';
 import { UsersIcon, ClipboardListIcon, LightBulbIcon, CheckCircleIcon, TrashIcon, PlusCircleIcon, KeyIcon, BriefcaseIcon, LogoutIcon, UserCircleIcon } from './components/Icons';
 import PreRegistrationFormPage from './components/PreRegistrationFormPage';
-import React, { useState } from 'react';
-import { Page, User, PendingUser } from './types';
-import PreRegistrationFormPage from './components/PreRegistrationFormPage';
 import FormInput from './components/FormInput';
 import Modal from './components/Modal';
-import { sendApprovalEmail } from './utils/emailService';
 import AdminLoginPage from './components/AdminLoginPage';
+import { sendApprovalEmail } from './utils/emailService'; // ✅ updated path
+
 
 const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
 const [searchTerm, setSearchTerm] = useState('');
@@ -155,6 +152,7 @@ const App: React.FC = () => {
         displayName: approvingUser.displayName,
         password: approvingUser.password,
         role: 'user',
+        
       };
       setUsers(prev => [...prev, newUser]);
       setPendingUsers(prev => prev.filter(pu => pu.id !== id));
@@ -162,6 +160,8 @@ const App: React.FC = () => {
       setShowSuccessModal(true);
       // Simulate email notification (log)
       console.log(`📧 Email sent to ${approvingUser.email}: Your account has been approved.`);
+      await sendApprovalEmail(approvingUser.email, approvingUser.displayName);
+
     }
   };
 
