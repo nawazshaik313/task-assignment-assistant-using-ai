@@ -24,28 +24,7 @@ return <AdminLoginPage onLogin={() => { setIsAdminLoggedIn(true); setPage('userM
 <button onClick={() => navigateTo('adminLogin')} className="bg-orange-600 text-white px-4 py-2 rounded">
 Admin Login
 </button>
-const handleApproveUser = async (id: string) => {
-  const approvingUser = pendingUsers.find(pu => pu.id === id);
-  if (approvingUser) {
-    const newUser: User = {
-      id: Date.now().toString(),
-      email: approvingUser.email,
-      uniqueId: approvingUser.uniqueId,
-      displayName: approvingUser.displayName,
-      password: approvingUser.password,
-      role: 'user',
-    };
 
-    setUsers(prev => [...prev, newUser]);
-    setPendingUsers(prev => prev.filter(pu => pu.id !== id));
-
-    // ✅ Send email after approval
-    await sendApprovalEmail(approvingUser.email, approvingUser.displayName);
-
-    setSuccessMessage(`User ${approvingUser.displayName} approved.`);
-    setShowSuccessModal(true);
-  }
-};
 
 const App: React.FC = () => {
   const [page, setPage] = useState<Page>('login');
@@ -161,7 +140,7 @@ const App: React.FC = () => {
     setUsers(prev => [...prev, newUser]);
     setPendingUsers(prev => prev.filter(pu => pu.id !== id));
 
-    // ✅ Await email notification
+    // ✅ Send email after approval
     try {
       await sendApprovalEmail(approvingUser.email, approvingUser.displayName);
       setSuccessMessage(`User ${approvingUser.displayName} approved.`);
@@ -173,6 +152,7 @@ const App: React.FC = () => {
     setShowSuccessModal(true);
   }
 };
+
 
 
   const handleRejectUser = (id: string) => {
