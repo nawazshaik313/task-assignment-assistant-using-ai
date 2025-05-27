@@ -10,7 +10,7 @@ import AdminLoginPage from './components/AdminLoginPage';
 import { sendApprovalEmail } from './utils/emailService'; // ✅ updated path
 
 // --- FORM COMPONENTS ---
-const AuthFormInput: React.FC<React.InputHTMLAttributes<HTMLInputElement> & { id: string; 'aria-label': string }> = ({ id, ...props }) => // --- FORM COMPONENTS ---
+const AuthFormInput: React.FC<React.InputHTMLAttributes<HTMLInputElement> & { id: string; 'aria-label': string }> = ({ id, ...props }) => (
 <input
 id={id}
 {...props}
