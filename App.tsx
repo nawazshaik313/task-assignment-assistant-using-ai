@@ -21,9 +21,7 @@ const AuthFormSelect: React.FC<React.SelectHTMLAttributes<HTMLSelectElement> & {
 <select
 id={id}
 {...props}
-className="w-full p-3 bg-authFormBg border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm text-textlight"
-
-{children}
+className="w-full p-3 bg-authFormBg border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm text-textlight"{children}
 </select> );
 const FormInput: React.FC<React.InputHTMLAttributes<HTMLInputElement> & { label: string; id: string }> = ({
 label,
