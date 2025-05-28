@@ -2,7 +2,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 // Fix: Changed to named import
-import { App } from './App';
+import App from './App';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
