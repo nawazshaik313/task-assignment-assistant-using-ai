@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { Page, User, Role, Task, Assignment, Program, GeminiSuggestion, NotificationPreference, AssignmentStatus, PendingUser, AdminLogEntry } from './types';
 import useLocalStorage from './hooks/useLocalStorage';
@@ -6,8 +7,10 @@ import LoadingSpinner from './components/LoadingSpinner';
 import { UsersIcon, ClipboardListIcon, LightBulbIcon, CheckCircleIcon, TrashIcon, PlusCircleIcon, KeyIcon, BriefcaseIcon, LogoutIcon, UserCircleIcon } from './components/Icons';
 import PreRegistrationFormPage from './components/PreRegistrationFormPage';
 import Modal from './components/Modal';
-import AdminLoginPage from './components/AdminLoginPage';
-import { sendApprovalEmail } from './src/utils/emailService'; // ✅ updated path
+import AdminLoginPage from './components/AdminLoginPage'; // Changed path
+import { sendApprovalEmail } from './utils/emailService'; // Changed path
+import './index.css';
+
 
 // --- FORM COMPONENTS ---
 const AuthFormInput: React.FC<React.InputHTMLAttributes<HTMLInputElement> & { id: string; 'aria-label': string }> = ({ id, ...props }) => (
@@ -86,8 +89,8 @@ const FormSelect: React.FC<
 );
 
 // --- MAIN APP COMPONENT ---
-const App: React.FC = () => {
-    const [page, setPage] = useState<Page>('login');
+export const App: React.FC = () => { // Added export here
+    const [page, setPage] = useState<Page>(Page.Login); // Changed to Page.Login
     const [showSuccessModal, setShowSuccessModal] = useState(false);
     const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
@@ -126,11 +129,11 @@ const App: React.FC = () => {
     };
 
     const [preRegistrationForm, setPreRegistrationForm] = useState({
-        email: '',
+        // email: '', // Email is not collected at pre-registration
         uniqueId: '',
         displayName: '',
-        password: '',
-        confirmPassword: '',
+        // password: '', // Password is not collected at pre-registration
+        // confirmPassword: '', // Not collected
         referringAdminId: '',
         referringAdminDisplayName: '',
         isReferralLinkValid: false
@@ -159,43 +162,50 @@ const App: React.FC = () => {
 
     const navigateTo = useCallback((targetPage: Page) => {
         clearMessages();
-        setPage(targetPage);
+        setPage(targetPage); // This setPage is for the local 'page' state, not 'currentPage'
+        window.location.hash = targetPage; // This will trigger the hashchange listener
     }, [clearMessages]);
 
     const filteredPendingUsers = pendingUsers.filter(user =>
-        user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (user.email && user.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
         user.uniqueId.toLowerCase().includes(searchTerm.toLowerCase()) ||
         user.displayName.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
+    // This function seems like a simplified/older version. The main approval flow is handleInitiateApprovePendingUser + handleSaveOrApproveUserByAdmin
     const handleApproveUser = async (id: string) => {
         const approvingUser = pendingUsers.find(pu => pu.id === id);
         if (approvingUser) {
             const newUser: User = {
                 id: Date.now().toString(),
-                email: approvingUser.email,
+                email: approvingUser.email || `pending-${approvingUser.uniqueId}@example.com`, // Provide a fallback or ensure email is set
                 uniqueId: approvingUser.uniqueId,
                 displayName: approvingUser.displayName,
-                password: approvingUser.password,
-                role: 'user'
+                password: approvingUser.password || 'DefaultPass123!', // Provide a fallback or ensure password is set by admin
+                role: 'user',
+                position: 'Newly Approved User', // Add missing position
             };
             setUsers(prev => [...prev, newUser]);
             setPendingUsers(prev => prev.filter(pu => pu.id !== id));
             try {
-                await sendApprovalEmail(approvingUser.email, approvingUser.displayName);
-                setSuccessMessage(`User ${approvingUser.displayName} approved.`);
+                if (newUser.email && newUser.email !== `pending-${approvingUser.uniqueId}@example.com`) { // Only send if a real email was available
+                     await sendApprovalEmail(newUser.email, newUser.displayName);
+                     setSuccessMessage(`User ${newUser.displayName} approved. Approval email simulated.`);
+                } else {
+                     setSuccessMessage(`User ${newUser.displayName} approved. Email not sent (email was not set).`);
+                }
             } catch (err) {
                 console.error('❌ Email error:', err);
-                setError('User approved, but email failed.');
+                setError(`User ${newUser.displayName} approved, but email failed to send.`);
             }
             setShowSuccessModal(true);
         }
     };
 
-    const handleRejectUser = (id: string) => {
+    const handleRejectUser = (id: string) => { // This is also a simplified version
         const rejectingUser = pendingUsers.find(pu => pu.id === id);
         setPendingUsers(prev => prev.filter(pu => pu.id !== id));
-        setSuccessMessage(`User ${rejectingUser?.displayName || ''} rejected.`);
+        setSuccessMessage(`User ${rejectingUser?.displayName || 'Unknown'} (ID: ${id}) rejected.`);
         setShowSuccessModal(true);
     };
 
@@ -218,35 +228,41 @@ const App: React.FC = () => {
                         isReferralLinkValid: true
                     }));
                 } else {
-                    setPreRegistrationForm(prev => ({ ...prev, isReferralLinkValid: false }));
+                    setPreRegistrationForm(prev => ({ ...prev, uniqueId: '', displayName: '', referringAdminId: '', referringAdminDisplayName: '', isReferralLinkValid: false }));
                     setError("Pre-registration link is invalid or missing administrator reference.");
                 }
                 _setCurrentPageInternal(Page.PreRegistration);
+                setPage(Page.PreRegistration); // Sync local page state
                 return;
             }
 
             if (!currentUser) {
                 _setCurrentPageInternal(Page.Login);
-                if (targetPageFromHashPath && targetPageFromHashPath !== Page.Login.toUpperCase()) {
-                    if (window.location.hash !== `#${Page.Login}`) navigateTo(Page.Login);
+                setPage(Page.Login); // Sync local page state
+                if (targetPageFromHashPath && targetPageFromHashPath !== Page.Login.toUpperCase() && targetPageFromHashPath !== Page.PreRegistration.toUpperCase()) {
+                     // Don't clear hash if it's pre-reg, allow processHash to handle it
+                     if (window.location.hash !== `#${Page.Login}`) window.location.hash = Page.Login;
                 }
                 return;
             }
 
             const defaultPageDetermination = currentUser.role === 'admin' ? Page.Dashboard : Page.ViewAssignments;
-            let newPage = (targetPageFromHashPath || defaultPageDetermination) as Page;
+            let newPage = (Object.values(Page).includes(targetPageFromHashPath as Page) ? targetPageFromHashPath : defaultPageDetermination) as Page;
 
-            if ([Page.Login, Page.PreRegistration].includes(newPage as Page)) {
+
+            if ([Page.Login, Page.PreRegistration].includes(newPage as Page) && currentUser) {
                 newPage = defaultPageDetermination;
             }
-
-            const currentTopLevelPagePath = window.location.hash.substring(1).split('?')[0].toUpperCase();
-            const targetParams = paramsString ? Object.fromEntries(params) : undefined;
-
-            if (newPage !== currentTopLevelPagePath) {
-                navigateTo(newPage);
-            }
+            
             _setCurrentPageInternal(newPage);
+            setPage(newPage); // Sync local page state
+
+            // If the hash isn't already set to newPage, update it.
+            // This avoids an infinite loop if newPage is derived from hash.
+            const currentHashPage = window.location.hash.substring(1).split('?')[0].toUpperCase();
+            if (currentHashPage !== newPage.toUpperCase()) {
+                 window.location.hash = newPage;
+            }
         };
 
         processHash();
@@ -255,7 +271,7 @@ const App: React.FC = () => {
         return () => {
             window.removeEventListener('hashchange', processHash);
         };
-    }, [currentUser, navigateTo, clearMessages, users]);
+    }, [currentUser, users, clearMessages]); // Removed navigateTo from dependencies as it causes loops, hash change handles navigation
 
 
     useEffect(() => {
@@ -306,20 +322,20 @@ const App: React.FC = () => {
         const newUser: User = {
             id: Date.now().toString(),
             email: email,
-            uniqueId: email,
+            uniqueId: email, // Default uniqueId to email for new direct registrations
             password: password,
             role: role,
             displayName: name,
-            position: role === 'admin' ? 'Administrator' : 'Registered User',
+            position: role === 'admin' ? 'Administrator' : 'Registered User', // Default position
             userInterests: '',
             phone: '',
-            notificationPreference: 'email',
+            notificationPreference: 'email', // Default preference
         };
 
         setUsers(prevUsers => [...prevUsers, newUser]);
         setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user' });
         setSuccessMessage(`Registration successful for ${name}! Please login.`);
-        setAuthView('login');
+        setAuthView('login'); // Switch to login view after successful registration
     };
 
     const handleLogin = (e: React.FormEvent) => {
@@ -335,19 +351,26 @@ const App: React.FC = () => {
 
         const user = users.find(u => u.email === emailToLogin);
         if (user) {
-            if (user.password === passwordToLogin) {
+            if (user.password === passwordToLogin) { // In a real app, hash and compare password
                 setCurrentUser(user);
-                setNewLoginForm({ email: '', password: '' });
+                setNewLoginForm({ email: '', password: '' }); // Clear login form
                 setSuccessMessage(`Login successful! Welcome back, ${user.displayName}.`);
+                navigateTo(user.role === 'admin' ? Page.Dashboard : Page.ViewAssignments);
             } else {
                 setError("Invalid password.");
             }
         } else {
-            setError("Email address not found or account not yet approved/created.");
+            const pending = pendingUsers.find(pu => pu.email === emailToLogin); // Check if email was pre-set on pending user
+            if (pending) {
+                 setError("Your account is pending approval or full setup by an administrator. Please wait for confirmation.");
+            } else {
+                setError("Email address not found or account not yet approved/created.");
+            }
         }
     };
 
     const handleForgotPassword = () => { clearMessages(); if (!newLoginForm.email.trim()) { setError("Please enter your Email Address first to check for password recovery options."); return; } const userToCheck = users.find(u => u.email === newLoginForm.email); if (userToCheck) { setInfoMessage(`Password Recovery for '${userToCheck.displayName}': In a real system, a password reset link would be sent to ${userToCheck.email}. This demo doesn't send actual emails.`); } else { setError("Email Address not found in the system."); } };
+    
     const handlePreRegistrationSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         clearMessages();
@@ -359,39 +382,46 @@ const App: React.FC = () => {
             setError("Your Desired System ID and Display Name are required.");
             return;
         }
+        // Ensure uniqueId is unique across both users and pendingUsers
         if (users.some(u => u.uniqueId === preRegistrationForm.uniqueId) || pendingUsers.some(pu => pu.uniqueId === preRegistrationForm.uniqueId)) {
             setError("This System ID has already been used or is pending approval. Please choose a different one.");
             return;
         }
+
+        // Email is not collected at this stage, so no validation for it here for pendingUsers.
+        // It will be set by admin.
+
         const newPendingUser: PendingUser = {
             id: Date.now().toString(),
+            // email: '', // Email is not set here. Admin sets it.
             uniqueId: preRegistrationForm.uniqueId,
             displayName: preRegistrationForm.displayName,
+            // password: '', // Password is not set here. Admin sets it.
             submissionDate: new Date().toISOString(),
             referringAdminId: preRegistrationForm.referringAdminId,
         };
         setPendingUsers(prev => [...prev, newPendingUser]);
-        setPreRegistrationForm({
-            email: '',
+        setPreRegistrationForm({ // Clear the form
+            // email: '',
             uniqueId: '',
             displayName: '',
-            password: '',
-            confirmPassword: '',
+            // password: '',
+            // confirmPassword: '',
             referringAdminId: '',
             referringAdminDisplayName: '',
-            isReferralLinkValid: false,
-        }); // Clear the form
+            isReferralLinkValid: false, // Will be reset by link usually
+        });
         setSuccessMessage("Your ID submission has been received. An administrator will review it. You can log in after approval and full account setup (including email and password assignment by admin).");
-        setAuthView('login');
+        setAuthView('login'); // Switch to login view
         navigateTo(Page.Login); // Redirect to login page view
     };
 
 
-    const handleLogout = () => { clearMessages(); setCurrentUser(null); setNewLoginForm({ email: '', password: '' }); setAuthView('login'); setPreRegistrationForm({ email: '', uniqueId: '', displayName: '', password: '', confirmPassword: '', referringAdminId: '', referringAdminDisplayName: '', isReferralLinkValid: false }); setSuccessMessage("You have been logged out."); navigateTo(Page.Login); };
+    const handleLogout = () => { clearMessages(); setCurrentUser(null); setNewLoginForm({ email: '', password: '' }); setAuthView('login'); setPreRegistrationForm({ uniqueId: '', displayName: '', referringAdminId: '', referringAdminDisplayName: '', isReferralLinkValid: false }); setSuccessMessage("You have been logged out."); navigateTo(Page.Login); };
     const handleUpdateProfile = (e: React.FormEvent) => { e.preventDefault(); if (!currentUser) return; clearMessages(); if (!userForm.displayName.trim()) { setError("Display name cannot be empty."); return; } if (!userForm.email.trim() || !/\S+@\S+\.\S+/.test(userForm.email)) { setError("A valid email address is required."); return; } if (userForm.email !== currentUser.email && users.some(u => u.email === userForm.email && u.id !== currentUser.id)) { setError("This email address is already in use by another account."); return; } if (userForm.uniqueId !== currentUser.uniqueId && users.some(u => u.uniqueId === userForm.uniqueId && u.id !== currentUser.id)) { setError("This System ID is already in use by another account."); return; } let newPassword = currentUser.password; if (userForm.password) { if (userForm.password !== userForm.confirmPassword) { setError("New passwords do not match."); return; } newPassword = userForm.password; } const updatedUser: User = { ...currentUser, email: userForm.email, uniqueId: currentUser.role === 'admin' ? userForm.uniqueId : currentUser.uniqueId, displayName: userForm.displayName, position: userForm.position, userInterests: userForm.userInterests, phone: userForm.phone, notificationPreference: userForm.notificationPreference, password: newPassword, }; setUsers(users.map(u => (u.id === currentUser.id ? updatedUser : u))); setCurrentUser(updatedUser); setUserForm(prev => ({ ...prev, password: '', confirmPassword: '' })); setSuccessMessage("Profile updated successfully."); navigateTo(currentUser.role === 'admin' ? Page.Dashboard : Page.ViewAssignments); };
     const handleSaveOrApproveUserByAdmin = (e: React.FormEvent) => { e.preventDefault(); clearMessages(); if (!userForm.email.trim() || !/\S+@\S+\.\S+/.test(userForm.email)) { setError("A valid email address is required."); return; } if (!userForm.uniqueId.trim() || !userForm.displayName.trim() || !userForm.position.trim()) { setError("Email, System ID, Display Name, and Position are required."); return; } const isEditing = !!editingUserId && !approvingPendingUser; const isApproving = !!approvingPendingUser; const isAddingNew = !isEditing && !isApproving; if (isAddingNew || isApproving) { if (!userForm.password) { setError("Password is required for new/approved users."); return; } if (userForm.password !== userForm.confirmPassword) { setError("Passwords do not match."); return; } } else if (isEditing) { if (userForm.password && userForm.password !== userForm.confirmPassword) { setError("New passwords do not match."); return; } } const targetId = editingUserId || approvingPendingUser?.id; if (users.some(u => u.email === userForm.email && u.id !== targetId)) { setError("This email address is already in use by another account."); return; } if (users.some(u => u.uniqueId === userForm.uniqueId && u.id !== targetId)) { setError("This System ID is already in use by another account."); return; } if (isAddingNew && pendingUsers.some(pu => pu.uniqueId === userForm.uniqueId && pu.id !== targetId)) { setError("This System ID is pending approval for another user. Resolve pending user or choose a different ID."); return; } if (isEditing) { const userToUpdate = users.find(u => u.id === editingUserId); if (!userToUpdate) { setError("User not found for editing."); return; } const updatedUser: User = { ...userToUpdate, email: userForm.email, uniqueId: userForm.uniqueId, displayName: userForm.displayName, position: userForm.position, userInterests: userForm.userInterests, phone: userForm.phone, notificationPreference: userForm.notificationPreference, role: userForm.role, password: userForm.password ? userForm.password : userToUpdate.password, }; setUsers(users.map(u => u.id === editingUserId ? updatedUser : u)); setSuccessMessage(`User '${updatedUser.displayName}' updated successfully.`); } else { const newUser: User = { id: approvingPendingUser ? approvingPendingUser.id : Date.now().toString(), email: userForm.email, uniqueId: userForm.uniqueId, password: userForm.password!, displayName: userForm.displayName, position: userForm.position, userInterests: userForm.userInterests, phone: userForm.phone, notificationPreference: userForm.notificationPreference, role: userForm.role, referringAdminId: approvingPendingUser ? approvingPendingUser.referringAdminId : currentUser?.id, }; setUsers(prevUsers => [...prevUsers, newUser]); if (approvingPendingUser) { setPendingUsers(prevPending => prevPending.filter(pu => pu.id !== approvingPendingUser.id)); setSuccessMessage(`User '${newUser.displayName}' (System ID: ${newUser.uniqueId}) approved with email ${newUser.email}, account activated, and password set. (Notification via ${newUser.notificationPreference || 'none'} would be sent.)`); } else { setSuccessMessage(`User '${newUser.displayName}' (System ID: ${newUser.uniqueId}) added with email ${newUser.email} and password.`); } } setUserForm(initialUserFormData); setEditingUserId(null); setApprovingPendingUser(null); };
     const handleEditUserByAdmin = (user: User) => { setApprovingPendingUser(null); setEditingUserId(user.id); setUserForm({ email: user.email, uniqueId: user.uniqueId, displayName: user.displayName, position: user.position, userInterests: user.userInterests || '', phone: user.phone || '', notificationPreference: user.notificationPreference || 'none', role: user.role, password: '', confirmPassword: '', referringAdminId: user.referringAdminId || '' }); clearMessages(); };
-    const handleInitiateApprovePendingUser = (pendingUser: PendingUser) => { setEditingUserId(null); setApprovingPendingUser(pendingUser); setUserForm({ ...initialUserFormData, uniqueId: pendingUser.uniqueId, displayName: pendingUser.displayName, referringAdminId: pendingUser.referringAdminId, role: 'user', }); clearMessages(); setInfoMessage(`Reviewing pending user: ${pendingUser.displayName} (ID: ${pendingUser.uniqueId}). Please set their email, complete their profile, set a password, and assign a role.`); };
+    const handleInitiateApprovePendingUser = (pendingUser: PendingUser) => { setEditingUserId(null); setApprovingPendingUser(pendingUser); setUserForm({ ...initialUserFormData, uniqueId: pendingUser.uniqueId, displayName: pendingUser.displayName, referringAdminId: pendingUser.referringAdminId, role: 'user', email: pendingUser.email || '', // Populate email if admin somehow pre-set it on PendingUser, else admin sets now. }); clearMessages(); setInfoMessage(`Reviewing pending user: ${pendingUser.displayName} (ID: ${pendingUser.uniqueId}). Please set their email, complete their profile, set a password, and assign a role.`); };
     const handleRejectPendingUser = (pendingUserId: string) => { setPendingUsers(prev => prev.filter(pu => pu.id !== pendingUserId)); setSuccessMessage("Pending user request rejected."); if (approvingPendingUser?.id === pendingUserId) { setApprovingPendingUser(null); setUserForm(initialUserFormData); } };
     const handleDeleteUser = (userId: string) => { if (currentUser?.role !== 'admin') { setError("Only admins can delete users."); return; } if (userId === currentUser?.id) { setError("You cannot delete your own account."); return; } setUsers(users.filter(u => u.id !== userId)); setAssignments(assignments.filter(a => a.personId !== userId)); setSuccessMessage("User deleted successfully."); if (editingUserId === userId) { setEditingUserId(null); setUserForm(initialUserFormData); } };
     const handleAddProgram = (e: React.FormEvent) => { e.preventDefault(); clearMessages(); if (!programForm.name.trim()) { setError("Program name cannot be empty."); return; } const newProgram: Program = { ...programForm, id: Date.now().toString() }; setPrograms([...programs, newProgram]); setProgramForm({ name: '', description: '' }); setSuccessMessage(`Program "${newProgram.name}" added successfully.`); };
@@ -408,16 +438,32 @@ const App: React.FC = () => {
     const handleDeleteAdminLogEntry = (logId: string) => { if (!currentUser || currentUser.role !== 'admin') return; setAdminLogs(prevLogs => prevLogs.filter(log => log.id !== logId)); setSuccessMessage("Log entry deleted."); };
 
 
-    if (page === 'adminLogin') {
+    // The local 'page' state is used by AdminLoginPage and PreRegistrationFormPage logic directly.
+    // 'currentPage' is derived from hash and drives most of the main content rendering.
+    // Ensure they are somewhat synchronized or that their distinct uses are clear.
+    if (page === Page.InitialAdminSetup && !currentUser) { // This condition might be 'adminLogin' in older versions.
+        // The AdminLoginPage component is shown based on the !currentUser check primarily.
+        // Using Page.InitialAdminSetup might be a way to force an admin setup flow if no users exist.
+        // For now, keeping it as AdminLoginPage if 'page' state leads here.
         return (
             <AdminLoginPage onLogin={() => {
-                setIsAdminLoggedIn(true);
-                setPage('userManagement');
+                const adminUser: User = { // Simulate admin login
+                     id: 'admin-temp-id',
+                     email: 'admin@example.com', // For demo
+                     uniqueId: 'admin',
+                     password: 'password', 
+                     role: 'admin',
+                     displayName: 'Founding Admin',
+                     position: 'Administrator'
+                };
+                setCurrentUser(adminUser);
+                navigateTo(Page.Dashboard); 
             }} />
         );
     }
-
-    if (page === 'preRegister' && !currentUser) {
+    
+    // Use 'currentPage' for routing PreRegistration as it's controlled by hash
+    if (currentPage === Page.PreRegistration && !currentUser) { 
         return (
             <PreRegistrationFormPage
                 formState={preRegistrationForm}
@@ -565,8 +611,15 @@ const App: React.FC = () => {
 
     const renderPage = () => {
         if (!currentUser) {
-            console.error("Error: renderPage called without currentUser, but auth/pre-reg flow should handle this.");
-            return <LoadingSpinner />;
+            // This state should be handled by top-level conditional or useEffect.
+            // If PreRegistration is the target, it's handled above.
+            // Fallback to ensure login page is shown if somehow currentUser is null here.
+            if (currentPage !== Page.Login && currentPage !== Page.PreRegistration) {
+              console.warn("RenderPage called without currentUser for a protected page, redirecting to Login. Current page from hash:", currentPage);
+              navigateTo(Page.Login); // Navigate to login if not already there or pre-reg
+            }
+            // If currentPage is Login or PreRegistration, the outer conditional rendering will handle it.
+            return <LoadingSpinner />; 
         }
 
         switch (currentPage) {
@@ -600,7 +653,7 @@ const App: React.FC = () => {
             case Page.AssignWork: if (currentUser.role !== 'admin') return <p>Access Denied.</p>; const assignableTasks = tasks.filter(task => !assignments.find(a => a.taskId === task.id && a.status !== 'declined_by_user' && a.status !== 'completed_admin_approved')); const selectedTaskDetails = selectedTaskForAssignment ? tasks.find(t => t.id === selectedTaskForAssignment) : null; const activeUserIdsCurrentlyWithTasks = assignments.filter(a => a.status === 'pending_acceptance' || a.status === 'accepted_by_user').map(a => a.personId); const anyTrulyAvailableUsersForAISuggestion = users.some(u => u.role === 'user' && !activeUserIdsCurrentlyWithTasks.includes(u.id)); return (<div> <h2 className="text-2xl font-semibold mb-6 text-accent flex items-center"><LightBulbIcon className="w-7 h-7 mr-2" /> Assign Work using AI</h2> <div className="bg-surface shadow-lg rounded-lg p-6 space-y-6"> <FormSelect id="selectTask" label="Select Task to Assign" value={selectedTaskForAssignment || ''} onChange={e => { setSelectedTaskForAssignment(e.target.value); setAssignmentSuggestion(null); setAssignmentForm({ specificDeadline: '' }); clearMessages(); }} > <option value="" disabled>-- Select a Task --</option> {assignableTasks.map(task => (<option key={task.id} value={task.id}>{task.title} {task.programName ? `(${task.programName})` : ''}</option>))} </FormSelect> {selectedTaskDetails && selectedTaskDetails.deadline && (<p className="text-sm text-neutral">Default Task Deadline: {new Date(selectedTaskDetails.deadline).toLocaleDateString()}</p>)} <FormInput id="assignmentSpecificDeadline" label="Assignment Specific Deadline (Optional - Overrides Task Deadline)" type="date" value={assignmentForm.specificDeadline || ''} onChange={e => setAssignmentForm(prev => ({ ...prev, specificDeadline: e.target.value }))} disabled={!selectedTaskForAssignment} /> {assignableTasks.length === 0 && tasks.length > 0 && <p className="text-sm text-neutral mt-2">All tasks are currently assigned, pending acceptance, submitted, or completed.</p>} {tasks.length === 0 && <p className="text-sm text-neutral mt-2">No tasks available. Add tasks first.</p>} {!anyTrulyAvailableUsersForAISuggestion && users.filter(u => u.role === 'user').length > 0 && (<p className="text-sm text-warning mt-2">All available users currently have active tasks. Cannot suggest new assignments until tasks are completed.</p>)} <button onClick={fetchAssignmentSuggestion} disabled={!selectedTaskForAssignment || isLoadingSuggestion || !anyTrulyAvailableUsersForAISuggestion} className="w-full btn-accent disabled:bg-gray-300" > {isLoadingSuggestion ? 'Getting Suggestion...' : 'Get AI Suggestion'} </button> {isLoadingSuggestion && <LoadingSpinner />} {assignmentSuggestion && !isLoadingSuggestion && (<div className={`mt-6 p-4 rounded-md ${assignmentSuggestion.suggestedPersonName ? 'bg-green-50 border-green-300' : 'bg-yellow-50 border-yellow-300'} border`}> <h3 className={`text-lg font-medium ${assignmentSuggestion.suggestedPersonName ? 'text-green-700' : 'text-yellow-700'}`}>AI Suggestion:</h3> {assignmentSuggestion.suggestedPersonName ? (<> <p className="mt-1 text-sm text-green-600"><strong>Suggested Person:</strong> {assignmentSuggestion.suggestedPersonName}</p> <p className="mt-1 text-sm text-gray-600"><strong>Justification:</strong> {assignmentSuggestion.justification}</p> <button onClick={handleConfirmAssignmentByAdmin} className="mt-4 btn-success">Propose to User</button> </>) : (<p className="mt-1 text-sm text-yellow-600"><strong>Note:</strong> {assignmentSuggestion.justification || "AI could not find a suitable candidate or an error occurred."}</p>)} </div>)} </div> </div>);
             case Page.ViewAssignments: const assignmentsToShow = currentUser.role === 'admin' ? assignments : assignments.filter(a => a.personId === currentUser.id); return (<div> <h2 className="text-2xl font-semibold mb-6 text-purple-600 flex items-center"><CheckCircleIcon className="w-7 h-7 mr-2" /> {currentUser.role === 'admin' ? 'All Assignments' : 'My Assignments'} ({assignmentsToShow.length})</h2> {assignmentsToShow.length === 0 ? <p className="text-neutral">No assignments found.</p> : (<div className="space-y-4"> {assignmentsToShow.sort((a, b) => { const statusOrder = (s: AssignmentStatus) => { if (s === 'pending_acceptance' || s === 'accepted_by_user') return 1; if (s === 'submitted_late' || s === 'submitted_on_time') return 2; return 3; }; if (statusOrder(a.status) !== statusOrder(b.status)) return statusOrder(a.status) - statusOrder(b.status); if (a.deadline && b.deadline) return new Date(a.deadline).getTime() - new Date(b.deadline).getTime(); if (a.userSubmissionDate && b.userSubmissionDate) return new Date(b.userSubmissionDate).getTime() - new Date(a.userSubmissionDate).getTime(); return 0; }).map(a => { const task = tasks.find(t => t.id === a.taskId); let statusText = ''; let statusColorClass = 'bg-neutral'; const isOverdue = a.status === 'accepted_by_user' && a.deadline && new Date() > new Date(new Date(a.deadline).setHours(23, 59, 59, 999)); switch (a.status) { case 'pending_acceptance': statusText = 'Pending Acceptance'; statusColorClass = 'bg-warning text-black'; break; case 'accepted_by_user': statusText = isOverdue ? 'Overdue - In Progress' : 'Accepted - In Progress'; statusColorClass = isOverdue ? 'bg-red-400' : 'bg-blue-500'; break; case 'declined_by_user': statusText = 'Declined by User'; statusColorClass = 'bg-danger'; break; case 'submitted_on_time': statusText = 'Submitted On Time'; statusColorClass = 'bg-green-500'; break; case 'submitted_late': statusText = 'Submitted Late'; statusColorClass = 'bg-orange-500'; break; case 'completed_admin_approved': statusText = 'Completed & Approved'; statusColorClass = 'bg-success'; break; default: statusText = 'Unknown Status'; } return (<div key={`${a.taskId}-${a.personId}`} className={`bg-surface shadow-lg rounded-lg p-6 border-l-4 ${isOverdue && a.status === 'accepted_by_user' ? 'border-danger' : 'border-transparent'}`}> <div className="flex justify-between items-start"> <h3 className="text-lg font-semibold text-purple-700">{a.taskTitle}</h3> <span className={`text-xs px-2 py-1 rounded-full text-white ${statusColorClass}`}>{statusText}</span> </div> {task?.programName && <p className="text-xs text-blue-500 bg-blue-100 inline-block px-2 py-0.5 rounded-full my-1">Program: {task.programName}</p>} {currentUser.role === 'admin' && <p className="text-sm text-gray-700 mt-1"><strong>Assigned to:</strong> {a.personName}</p>} {a.deadline && <p className={`text-sm mt-1 ${isOverdue && a.status === 'accepted_by_user' ? 'text-danger font-semibold' : 'text-gray-600'}`}><strong>Deadline:</strong> {new Date(a.deadline).toLocaleDateString()}</p>} {a.justification && currentUser.role === 'admin' && <p className="text-xs text-gray-500 mt-2 italic"><strong>AI Justification:</strong> {a.justification}</p>} {a.userSubmissionDate && <p className="text-xs text-gray-500 mt-1"><strong>Submitted:</strong> {new Date(a.userSubmissionDate).toLocaleString()}</p>} {a.userDelayReason && <p className="text-xs text-gray-500 mt-1"><strong>Delay Reason:</strong> {a.userDelayReason}</p>} {currentUser.id === a.personId && a.status === 'pending_acceptance' && (<div className="mt-4 pt-3 border-t border-gray-200"> <p className="text-sm font-medium text-textlight mb-2">Are you interested in this task?</p> <button onClick={() => handleUserAssignmentResponse(a, true)} className="btn-success mr-2">Yes, Accept Task</button> <button onClick={() => handleUserAssignmentResponse(a, false)} className="btn-danger">No, Decline Task</button> </div>)} {currentUser.id === a.personId && a.status === 'accepted_by_user' && (<div className="mt-4 pt-3 border-t border-gray-200"> {assignmentToSubmitDelayReason === a.taskId && isOverdue && (<div className="my-2"> <FormTextarea id={`delay-reason-${a.taskId}`} label="Reason for Late Submission:" value={userSubmissionDelayReason} onChange={(e) => setUserSubmissionDelayReason(e.target.value)} placeholder="Please explain the delay..." required /> </div>)} <button onClick={() => { clearMessages(); if (isOverdue) { if (assignmentToSubmitDelayReason !== a.taskId) { setAssignmentToSubmitDelayReason(a.taskId); setUserSubmissionDelayReason(''); setInfoMessage("Submission is overdue. Please provide a reason for the delay below and click submit again."); return; } else { if (!userSubmissionDelayReason.trim()) { setError("Reason for delay cannot be empty when submitting late."); return; } } } handleCompleteTaskByUser(a, isOverdue ? userSubmissionDelayReason : undefined); }} className="btn-primary" > Mark as Completed / Submit </button> {assignmentToSubmitDelayReason === a.taskId && isOverdue && (<button onClick={() => { setAssignmentToSubmitDelayReason(null); setUserSubmissionDelayReason(''); clearMessages(); }} className="btn-neutral ml-2" > Cancel Delay Input </button>)} </div>)} {currentUser.role === 'admin' && (a.status === 'submitted_on_time' || a.status === 'submitted_late') && (<div className="mt-4 pt-3 border-t border-gray-200"> <button onClick={() => handleAdminApproveCompletion(a)} className="btn-success">Approve & Close Task</button> </div>)} {currentUser.role === 'admin' && a.status !== 'completed_admin_approved' && (<button onClick={() => handleAdminUnassignTask(a)} className="mt-3 text-sm text-red-500 hover:text-red-700 flex items-center"><TrashIcon className="w-4 h-4 mr-1" /> Unassign / Clear This Assignment</button>)} </div>) })} </div>)} </div>);
             default:
-                console.warn("Reached default case in renderPage, attempting to redirect.", currentPage);
+                console.warn("Reached default case in renderPage, attempting to redirect. CurrentPage from state:", currentPage, "Window hash:", window.location.hash);
                 navigateTo(currentUser ? (currentUser.role === 'admin' ? Page.Dashboard : Page.ViewAssignments) : Page.Login);
                 return <LoadingSpinner />;
         }
@@ -612,6 +665,24 @@ const App: React.FC = () => {
 
 
     if (!currentUser) {
+        if (currentPage === Page.PreRegistration) { // This check is crucial for PreRegistration page
+             return (
+                 <PreRegistrationFormPage
+                    formState={preRegistrationForm}
+                    setFormState={setPreRegistrationForm}
+                    onSubmit={handlePreRegistrationSubmit}
+                    error={error}
+                    successMessage={successMessage}
+                    infoMessage={infoMessage}
+                    clearMessages={clearMessages}
+                    navigateToLogin={() => {
+                        setAuthView('login');
+                        navigateTo(Page.Login);
+                    }}
+                />
+             );
+        }
+        // For all other cases where currentUser is null, show Login/Register
         return (
             <div className="min-h-screen flex flex-col items-center justify-center bg-authPageBg p-4">
                 <UIMessages />
@@ -655,4 +726,5 @@ const App: React.FC = () => {
     );
   };
 
-export default App;
+// Removed default export as App is now a named export
+// export default App;
