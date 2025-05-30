@@ -29,11 +29,12 @@ export interface User {
 
 export interface PendingUser {
   id: string;
-  email: string; // User's email provided during pre-registration
   uniqueId: string; // User's chosen ID during pre-registration
   displayName:string;
   submissionDate: string;
   referringAdminId: string; // ID of the admin who generated the pre-reg link
+  email?: string; // User's email, set during pre-registration
+  password?: string; // User's password, set during pre-registration
 }
 
 export interface Program {
@@ -69,7 +70,6 @@ export enum Page {
   AdminRegistrationEmail = 'ADMIN_REGISTRATION_EMAIL',
   AdminRegistrationProfile = 'ADMIN_REGISTRATION_PROFILE',
   Login = 'LOGIN',
-  AdminLogin = 'ADMIN_LOGIN', // Added for dedicated admin login page
   PreRegistration = 'PRE_REGISTRATION',
   Dashboard = 'DASHBOARD',
   UserProfile = 'USER_PROFILE',

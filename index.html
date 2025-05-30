@@ -1,35 +1,41 @@
+
 <!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Task Assignment Assistant</title>
+    <link rel="stylesheet" href="/index.css">
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            colors: {
-              primary: 'rgb(var(--color-primary) / <alpha-value>)',
-              secondary: 'rgb(var(--color-secondary) / <alpha-value>)',
-              accent: 'rgb(var(--color-accent) / <alpha-value>)',
-              neutral: 'rgb(var(--color-neutral) / <alpha-value>)',
-              bground: 'rgb(var(--color-bground) / <alpha-value>)',
-              surface: 'rgb(var(--color-surface) / <alpha-value>)',
-              textlight: 'rgb(var(--color-textlight) / <alpha-value>)',
-              texthighlight: 'rgb(var(--color-texthighlight) / <alpha-value>)',
-              danger: 'rgb(var(--color-danger) / <alpha-value>)',
-              warning: 'rgb(var(--color-warning) / <alpha-value>)',
-              info: 'rgb(var(--color-info) / <alpha-value>)',
-              success: 'rgb(var(--color-success) / <alpha-value>)',
-              authFormBg: '#F0F0F0', // Light gray for input fields as per image
-              authButton: '#A7DBD8', // Light teal/aqua for buttons
-              authButtonHover: '#8CD0C7', // Slightly darker teal/aqua for hover
-              authLink: '#E06377', // Reddish-pink for links
-              authPageBg: '#D6E6F2', // Pale blue for overall page background
+      if (window.tailwind) {
+        tailwind.config = {
+          theme: {
+            extend: {
+              colors: {
+                primary: 'rgb(var(--color-primary) / <alpha-value>)',
+                secondary: 'rgb(var(--color-secondary) / <alpha-value>)',
+                accent: 'rgb(var(--color-accent) / <alpha-value>)',
+                neutral: 'rgb(var(--color-neutral) / <alpha-value>)',
+                bground: 'rgb(var(--color-bground) / <alpha-value>)',
+                surface: 'rgb(var(--color-surface) / <alpha-value>)',
+                textlight: 'rgb(var(--color-textlight) / <alpha-value>)',
+                texthighlight: 'rgb(var(--color-texthighlight) / <alpha-value>)',
+                danger: 'rgb(var(--color-danger) / <alpha-value>)',
+                warning: 'rgb(var(--color-warning) / <alpha-value>)',
+                info: 'rgb(var(--color-info) / <alpha-value>)',
+                success: 'rgb(var(--color-success) / <alpha-value>)',
+                authFormBg: '#F0F0F0', // Light gray for input fields as per image
+                authButton: '#A7DBD8', // Light teal/aqua for buttons
+                authButtonHover: '#8CD0C7', // Slightly darker teal/aqua for hover
+                authLink: '#E06377', // Reddish-pink for links
+                authPageBg: '#D6E6F2', // Pale blue for overall page background
+              }
             }
           }
         }
+      } else {
+        console.error("Tailwind CSS CDN failed to load. Styles will be broken. Please check your internet connection or the CDN status.");
       }
     </script>
     <style type="text/tailwindcss">
@@ -107,5 +113,4 @@
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
   </body>
-</html><link rel="stylesheet" href="index.css">
-<script src="index.tsx" type="module"></script>
+</html>
