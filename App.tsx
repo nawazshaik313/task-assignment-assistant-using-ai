@@ -151,7 +151,7 @@ export const App = (): JSX.Element => {
         ] = await Promise.all([
           cloudDataService.loadUsersFromCloud(),
           cloudDataService.loadPendingUsersFromCloud(),
-          cloudDataService.loadTasksFromCloud(),
+          const loadedTasks = await fetch("http://localhost:5000/api/taskshttps://task-assignment-assistant-using-ai.onrender.com/").then(res => res.json());,
           cloudDataService.loadProgramsFromCloud(),
           cloudDataService.loadAssignmentsFromCloud(),
           cloudDataService.loadAdminLogsFromCloud(),
@@ -373,6 +373,13 @@ export const App = (): JSX.Element => {
             submissionDate: new Date().toISOString(),
             referringAdminId: "GENERAL_REGISTRATION" 
         };
+        useEffect(() => {
+        fetch("https://task-assignment-assistant-using-ai.onrender.com/")
+            .then(res => res.json())
+            .then(data => console.log("Backend tasks:", data))
+            .catch(err => console.error("Error fetching from backend:", err));
+        }, []);
+
         const updatedPendingUsers = [...pendingUsers, newPendingUser];
         setPendingUsers(updatedPendingUsers);
         await cloudDataService.savePendingUsersToCloud(updatedPendingUsers);
