@@ -3,8 +3,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Page, User, Role, Task, Assignment, Program, GeminiSuggestion, NotificationPreference, AssignmentStatus, PendingUser, AdminLogEntry } from './types';
 import useLocalStorage from './hooks/useLocalStorage';
 import { getAssignmentSuggestion } from './services/geminiService';
-import * as emailService from './src/utils/emailService'; // Corrected path
-import { validatePassword } from './src/utils/validation'; // Import password validation
+import * as emailService from './utils/emailService'; // Corrected path
+import { validatePassword } from './utils/validation'; // Import password validation
+import * as cloudDataService from './services/cloudDataService'; // Import the new service
 import LoadingSpinner from './components/LoadingSpinner';
 import { UsersIcon, ClipboardListIcon, LightBulbIcon, CheckCircleIcon, TrashIcon, PlusCircleIcon, KeyIcon, BriefcaseIcon, LogoutIcon, UserCircleIcon } from './components/Icons';
 import PreRegistrationFormPage from './components/PreRegistrationFormPage';
@@ -81,13 +82,17 @@ const passwordRequirementsText = "Must be at least 8 characters and include an u
 
 export const App = (): JSX.Element => {
   const [currentPage, _setCurrentPageInternal] = useState<Page>(Page.Login); 
-  const [users, setUsers] = useLocalStorage<User[]>('task-assign-users', []);
-  const [pendingUsers, setPendingUsers] = useLocalStorage<PendingUser[]>('task-assign-pending-users', []);
-  const [currentUser, setCurrentUser] = useLocalStorage<User | null>('task-assign-currentUser', null);
-  const [tasks, setTasks] = useLocalStorage<Task[]>('task-assign-tasks', []);
-  const [programs, setPrograms] = useLocalStorage<Program[]>('task-assign-programs', []);
-  const [assignments, setAssignments] = useLocalStorage<Assignment[]>('task-assign-assignments', []);
-  const [adminLogs, setAdminLogs] = useLocalStorage<AdminLogEntry[]>('task-assign-adminLogs', []);
+  
+  // State management with useState, data loaded from cloudDataService
+  const [users, setUsers] = useState<User[]>([]);
+  const [pendingUsers, setPendingUsers] = useState<PendingUser[]>([]);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [programs, setPrograms] = useState<Program[]>([]);
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [adminLogs, setAdminLogs] = useState<AdminLogEntry[]>([]);
+  const [isLoadingAppData, setIsLoadingAppData] = useState<boolean>(true);
+
 
   const [authView, setAuthView] = useState<'login' | 'register'>('login');
   const [newLoginForm, setNewLoginForm] = useState({ email: '', password: '' });
@@ -100,7 +105,8 @@ export const App = (): JSX.Element => {
   });
   
   const [adminRegistrationForm, setAdminRegistrationForm] = useState(initialAdminRegistrationState);
-  const [preRegistrationForm, setPreRegistrationForm] = useLocalStorage('task-assign-preRegistrationForm',initialPreRegistrationFormState);
+  // preRegistrationForm still uses useLocalStorage for transient client-side state
+  const [preRegistrationForm, setPreRegistrationFormInternal] = useLocalStorage('task-assign-preRegistrationForm',initialPreRegistrationFormState);
   
   const initialUserFormData = { 
       email: '', uniqueId: '', password: '', confirmPassword: '', 
@@ -134,11 +140,52 @@ export const App = (): JSX.Element => {
   
   const [showUserTour, setShowUserTour] = useState<boolean>(false);
 
+  // Load initial data
+  useEffect(() => {
+    const loadData = async () => {
+      setIsLoadingAppData(true);
+      try {
+        const [
+          loadedUsers, loadedPendingUsers, loadedTasks, loadedPrograms, 
+          loadedAssignments, loadedAdminLogs, loadedCurrentUser
+        ] = await Promise.all([
+          cloudDataService.loadUsersFromCloud(),
+          cloudDataService.loadPendingUsersFromCloud(),
+          cloudDataService.loadTasksFromCloud(),
+          cloudDataService.loadProgramsFromCloud(),
+          cloudDataService.loadAssignmentsFromCloud(),
+          cloudDataService.loadAdminLogsFromCloud(),
+          cloudDataService.loadCurrentUserFromCloud()
+        ]);
+        setUsers(loadedUsers);
+        setPendingUsers(loadedPendingUsers);
+        setTasks(loadedTasks);
+        setPrograms(loadedPrograms);
+        setAssignments(loadedAssignments);
+        setAdminLogs(loadedAdminLogs);
+        setCurrentUser(loadedCurrentUser);
+      } catch (err) {
+        console.error("Failed to load app data:", err);
+        setError("Could not load application data. Please try refreshing.");
+      } finally {
+        setIsLoadingAppData(false);
+      }
+    };
+    loadData();
+  }, []);
+
+  // Wrapper for setPreRegistrationForm to persist to localStorage
+  const setPreRegistrationForm = (value: React.SetStateAction<typeof initialPreRegistrationFormState>) => {
+    setPreRegistrationFormInternal(value);
+  };
+
 
   const clearMessages = useCallback(() => { setError(null); setSuccessMessage(null); setInfoMessage(null); }, []);
   const navigateTo = useCallback((page: Page, params?: Record<string, string>) => { let hash = `#${page}`; if (params && Object.keys(params).length > 0) { hash += `?${new URLSearchParams(params).toString()}`; } if (window.location.hash !== hash) { window.location.hash = hash; } else { _setCurrentPageInternal(page); /* Ensure internal state updates if hash is same */ } }, []);
 
   useEffect(() => {
+    if (isLoadingAppData) return; // Don't process hash until data is loaded
+
     const processHash = () => {
       clearMessages();
       const hash = window.location.hash.substring(1);
@@ -191,7 +238,8 @@ export const App = (): JSX.Element => {
       // User Tour Logic
       if (currentUser && currentUser.role === 'user' && !localStorage.getItem(`hasCompletedUserTour_${currentUser.id}`)) {
          setTimeout(() => {
-            if (currentPage !== Page.Login && currentPage !== Page.PreRegistration) { // Ensure user is on a valid page
+            // Check currentPage from state, not from hash processing variables, as state might not have updated yet.
+            if (currentPage !== Page.Login && currentPage !== Page.PreRegistration) { 
                 setShowUserTour(true);
             }
         }, 500); // Small delay to allow page to render
@@ -204,7 +252,7 @@ export const App = (): JSX.Element => {
     return () => {
       window.removeEventListener('hashchange', processHash);
     };
-  }, [currentUser, navigateTo, clearMessages, users, currentPage]); // Added currentPage to dependencies
+  }, [currentUser, navigateTo, clearMessages, users, isLoadingAppData, _setCurrentPageInternal, currentPage]); // Added currentPage to dependencies
 
 
   useEffect(() => {
@@ -282,7 +330,9 @@ export const App = (): JSX.Element => {
             phone: '',
             notificationPreference: 'email',
         };
-        setUsers(prevUsers => [...prevUsers, newAdminUser]);
+        const updatedUsers = [...users, newAdminUser];
+        setUsers(updatedUsers);
+        await cloudDataService.saveUsersToCloud(updatedUsers);
         await emailService.sendWelcomeRegistrationEmail(newAdminUser.email, newAdminUser.displayName, newAdminUser.role);
         setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user' });
         setSuccessMessage(`Administrator account for ${name} created successfully! Please login. (Email simulation in console)`);
@@ -301,7 +351,9 @@ export const App = (): JSX.Element => {
             displayName: name,
             position: 'Administrator',
         };
-        setUsers(prevUsers => [...prevUsers, newAdminUser]);
+        const updatedUsers = [...users, newAdminUser];
+        setUsers(updatedUsers);
+        await cloudDataService.saveUsersToCloud(updatedUsers);
         await emailService.sendWelcomeRegistrationEmail(newAdminUser.email, newAdminUser.displayName, newAdminUser.role);
         setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user' });
         setSuccessMessage(`New Administrator account for ${name} created! Please login. (Email simulation in console)`);
@@ -313,32 +365,32 @@ export const App = (): JSX.Element => {
     if (role === 'user') {
         const newPendingUser: PendingUser = {
             id: Date.now().toString(),
-            uniqueId: email, // Using email as uniqueId for general registration for now
+            uniqueId: email, 
             displayName: name,
             email: email,
             password: password,
             role: 'user',
             submissionDate: new Date().toISOString(),
-            referringAdminId: "GENERAL_REGISTRATION" // Indicate it's not from a specific admin link
+            referringAdminId: "GENERAL_REGISTRATION" 
         };
-        setPendingUsers(prevPending => [...prevPending, newPendingUser]);
+        const updatedPendingUsers = [...pendingUsers, newPendingUser];
+        setPendingUsers(updatedPendingUsers);
+        await cloudDataService.savePendingUsersToCloud(updatedPendingUsers);
         
-        // Notify user their registration is pending
         await emailService.sendRegistrationPendingToUserEmail(newPendingUser.email, newPendingUser.displayName);
         
-        // Notify an admin
-        const adminToInform = getAdminToNotify(); // Find any admin
+        const adminToInform = getAdminToNotify();
         if (adminToInform) {
             await emailService.sendNewPendingRegistrationToAdminEmail(adminToInform.email, adminToInform.displayName, newPendingUser.displayName, newPendingUser.email);
         }
         
         setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user' });
         setSuccessMessage(`Registration for ${name} submitted! It's now pending administrator approval. (Email simulations in console)`);
-        setAuthView('login'); // Send them to login page, they can't log in yet.
+        setAuthView('login'); 
     }
   };
   
-  const handleLogin = (e: React.FormEvent) => { 
+  const handleLogin = async (e: React.FormEvent) => { 
     e.preventDefault(); 
     clearMessages(); 
     const emailToLogin = newLoginForm.email;
@@ -353,9 +405,10 @@ export const App = (): JSX.Element => {
     if (user) { 
       if (user.password === passwordToLogin) { 
         setCurrentUser(user); 
+        await cloudDataService.saveCurrentUserToCloud(user);
         setNewLoginForm({ email: '', password: '' }); 
         setSuccessMessage(`Login successful! Welcome back, ${user.displayName}.`); 
-        // Navigation and tour logic handled by useEffect
+        // Navigation and tour logic handled by useEffect based on currentUser update
       } else { 
         setError("Invalid password."); 
       } 
@@ -416,21 +469,20 @@ export const App = (): JSX.Element => {
         displayName: preRegistrationForm.displayName,
         email: preRegistrationForm.email,
         password: preRegistrationForm.password, 
-        role: 'user', // Pre-registration always for 'user' role
+        role: 'user', 
         submissionDate: new Date().toISOString(),
         referringAdminId: preRegistrationForm.referringAdminId,
     };
+    const updatedPendingUsers = [...pendingUsers, newPendingUser];
+    setPendingUsers(updatedPendingUsers);
+    await cloudDataService.savePendingUsersToCloud(updatedPendingUsers);
 
-    setPendingUsers(prevPendingUsers => [...prevPendingUsers, newPendingUser]);
-
-    // Notify user
     await emailService.sendPreRegistrationSubmittedToUserEmail(
         newPendingUser.email!, 
         newPendingUser.displayName,
         preRegistrationForm.referringAdminDisplayName || "Administrator"
     );
 
-    // Notify referring admin
     const referringAdmin = users.find(u => u.id === preRegistrationForm.referringAdminId);
     if (referringAdmin) {
         await emailService.sendPreRegistrationNotificationToAdminEmail(
@@ -446,9 +498,19 @@ export const App = (): JSX.Element => {
   };
 
 
-  const handleLogout = () => { clearMessages(); setCurrentUser(null); setNewLoginForm({ email: '', password: '' }); setAuthView('login'); setPreRegistrationForm(initialPreRegistrationFormState); setShowUserTour(false); setSuccessMessage("You have been logged out."); navigateTo(Page.Login); };
+  const handleLogout = async () => { 
+      clearMessages(); 
+      setCurrentUser(null); 
+      await cloudDataService.saveCurrentUserToCloud(null);
+      setNewLoginForm({ email: '', password: '' }); 
+      setAuthView('login'); 
+      setPreRegistrationForm(initialPreRegistrationFormState); 
+      setShowUserTour(false); 
+      setSuccessMessage("You have been logged out."); 
+      navigateTo(Page.Login); 
+  };
   
-  const handleUpdateProfile = (e: React.FormEvent) => { 
+  const handleUpdateProfile = async (e: React.FormEvent) => { 
     e.preventDefault(); 
     if (!currentUser) return; 
     clearMessages(); 
@@ -479,8 +541,11 @@ export const App = (): JSX.Element => {
       notificationPreference: userForm.notificationPreference, 
       password: newPassword, 
     }; 
-    setUsers(users.map(u => (u.id === currentUser.id ? updatedUser : u))); 
+    const updatedUsers = users.map(u => (u.id === currentUser.id ? updatedUser : u));
+    setUsers(updatedUsers); 
+    await cloudDataService.saveUsersToCloud(updatedUsers);
     setCurrentUser(updatedUser); 
+    await cloudDataService.saveCurrentUserToCloud(updatedUser);
     setUserForm(prev => ({ ...prev, password: '', confirmPassword: '' })); 
     setSuccessMessage("Profile updated successfully."); 
     navigateTo(currentUser.role === 'admin' ? Page.Dashboard : Page.ViewAssignments); 
@@ -509,8 +574,8 @@ export const App = (): JSX.Element => {
         finalPassword = userForm.password;
     } else if (isEditing) { 
         const userToUpdate = users.find(u => u.id === editingUserId);
-        if (!userToUpdate) { setError("User not found for editing."); return; } // Should not happen
-        if (userForm.password) { // If new password is being set
+        if (!userToUpdate) { setError("User not found for editing."); return; } 
+        if (userForm.password) { 
           if (userForm.password !== userForm.confirmPassword) { 
               setError("New passwords do not match."); return; 
           } 
@@ -521,7 +586,7 @@ export const App = (): JSX.Element => {
           }
           finalPassword = userForm.password;
         } else {
-          finalPassword = userToUpdate.password; // Keep existing password
+          finalPassword = userToUpdate.password; 
         }
     }
      
@@ -541,7 +606,7 @@ export const App = (): JSX.Element => {
     if (isEditing) { 
       const userToUpdate = users.find(u => u.id === editingUserId); 
       if (!userToUpdate) { setError("User not found for editing."); return; } 
-      const updatedUser: User = { 
+      const updatedUserRec: User = { 
         ...userToUpdate, 
         email: userForm.email, 
         uniqueId: userForm.uniqueId, 
@@ -553,10 +618,12 @@ export const App = (): JSX.Element => {
         role: userForm.role, 
         password: finalPassword, 
       }; 
-      setUsers(users.map(u => u.id === editingUserId ? updatedUser : u)); 
-      setSuccessMessage(`User '${updatedUser.displayName}' updated successfully.`); 
+      const newUsersList = users.map(u => u.id === editingUserId ? updatedUserRec : u);
+      setUsers(newUsersList); 
+      await cloudDataService.saveUsersToCloud(newUsersList);
+      setSuccessMessage(`User '${updatedUserRec.displayName}' updated successfully.`); 
     } else { 
-      const newUser: User = { 
+      const newUserRec: User = { 
           id: approvingPendingUser ? approvingPendingUser.id : Date.now().toString(), 
           email: userForm.email, 
           uniqueId: userForm.uniqueId, 
@@ -569,16 +636,20 @@ export const App = (): JSX.Element => {
           role: userForm.role, 
           referringAdminId: approvingPendingUser ? approvingPendingUser.referringAdminId : currentUser?.id, 
       }; 
-      setUsers(prevUsers => [...prevUsers, newUser]); 
+      const newUsersList = [...users, newUserRec];
+      setUsers(newUsersList); 
+      await cloudDataService.saveUsersToCloud(newUsersList);
+
       if (approvingPendingUser) { 
-        setPendingUsers(prevPending => prevPending.filter(pu => pu.id !== approvingPendingUser.id)); 
-        await emailService.sendAccountActivatedByAdminEmail(newUser.email, newUser.displayName, adminActor.displayName);
-        setSuccessMessage(`User '${newUser.displayName}' approved from pending list. Account activated. (Email simulation in console)`); 
+        const newPendingUsersList = pendingUsers.filter(pu => pu.id !== approvingPendingUser.id);
+        setPendingUsers(newPendingUsersList); 
+        await cloudDataService.savePendingUsersToCloud(newPendingUsersList);
+        await emailService.sendAccountActivatedByAdminEmail(newUserRec.email, newUserRec.displayName, adminActor.displayName);
+        setSuccessMessage(`User '${newUserRec.displayName}' approved from pending list. Account activated. (Email simulation in console)`); 
       } else { 
-        // This case (direct add by admin) is already an active user, so welcome + activated makes sense
-        await emailService.sendWelcomeRegistrationEmail(newUser.email, newUser.displayName, newUser.role); 
-        await emailService.sendAccountActivatedByAdminEmail(newUser.email, newUser.displayName, adminActor.displayName);
-        setSuccessMessage(`User '${newUser.displayName}' added directly by admin. Account activated. (Email simulation in console)`); 
+        await emailService.sendWelcomeRegistrationEmail(newUserRec.email, newUserRec.displayName, newUserRec.role); 
+        await emailService.sendAccountActivatedByAdminEmail(newUserRec.email, newUserRec.displayName, adminActor.displayName);
+        setSuccessMessage(`User '${newUserRec.displayName}' added directly by admin. Account activated. (Email simulation in console)`); 
       } 
     } 
     setUserForm(initialUserFormData); 
@@ -597,8 +668,8 @@ export const App = (): JSX.Element => {
         displayName: pendingUser.displayName, 
         email: pendingUser.email || '', 
         password: pendingUser.password || '', 
-        confirmPassword: pendingUser.password || '', // Pre-fill confirm password as well
-        role: pendingUser.role || 'user', // Use role from pendingUser or default
+        confirmPassword: pendingUser.password || '', 
+        role: pendingUser.role || 'user', 
         referringAdminId: pendingUser.referringAdminId || '', 
     }); 
     clearMessages(); 
@@ -613,12 +684,72 @@ export const App = (): JSX.Element => {
     setInfoMessage(infoMsg);
   };
 
-  const handleRejectPendingUser = (pendingUserId: string) => { setPendingUsers(prev => prev.filter(pu => pu.id !== pendingUserId)); setSuccessMessage("Pending user request rejected."); if (approvingPendingUser?.id === pendingUserId) { setApprovingPendingUser(null); setUserForm(initialUserFormData); } };
-  const handleDeleteUser = (userId: string) => { if (currentUser?.role !== 'admin') { setError("Only admins can delete users."); return; } if (userId === currentUser?.id) { setError("You cannot delete your own account."); return; } setUsers(users.filter(u => u.id !== userId)); setAssignments(assignments.filter(a => a.personId !== userId)); setSuccessMessage("User deleted successfully."); if(editingUserId === userId) { setEditingUserId(null); setUserForm(initialUserFormData); } };
-  const handleAddProgram = (e: React.FormEvent) => { e.preventDefault(); clearMessages(); if (!programForm.name.trim()) { setError("Program name cannot be empty."); return; } const newProgram: Program = { ...programForm, id: Date.now().toString() }; setPrograms([...programs, newProgram]); setProgramForm({ name: '', description: '' }); setSuccessMessage(`Program "${newProgram.name}" added successfully.`); };
-  const handleDeleteProgram = (id: string) => { clearMessages(); const isProgramInUse = tasks.some(task => task.programId === id); if (isProgramInUse) { if (!window.confirm("This program is linked to tasks. Deleting it will unlink these tasks. Are you sure?")) { return; } setTasks(tasks.map(task => task.programId === id ? {...task, programId: undefined, programName: undefined } : task)); } setPrograms(programs.filter(p => p.id !== id)); setSuccessMessage("Program deleted successfully."); };
-  const handleAddTask = (e: React.FormEvent) => { e.preventDefault(); clearMessages(); if (!taskForm.title.trim()) { setError("Task title cannot be empty."); return; } const program = programs.find(p => p.id === taskForm.programId); const newTask: Task = { id: Date.now().toString(), title: taskForm.title, description: taskForm.description, requiredSkills: taskForm.requiredSkills, programId: taskForm.programId || undefined, programName: program ? program.name : undefined, deadline: taskForm.deadline || undefined }; setTasks([...tasks, newTask]); setTaskForm({ title: '', description: '', requiredSkills: '', programId: '', deadline: '' }); setSuccessMessage(`Task "${newTask.title}" added successfully.`); };
-  const handleDeleteTask = (id: string) => { clearMessages(); setTasks(tasks.filter(t => t.id !== id)); setAssignments(assignments.filter(a => a.taskId !== id));  setSuccessMessage("Task deleted successfully."); };
+  const handleRejectPendingUser = async (pendingUserId: string) => { 
+      const newPendingUsersList = pendingUsers.filter(pu => pu.id !== pendingUserId);
+      setPendingUsers(newPendingUsersList); 
+      await cloudDataService.savePendingUsersToCloud(newPendingUsersList);
+      setSuccessMessage("Pending user request rejected."); 
+      if (approvingPendingUser?.id === pendingUserId) { setApprovingPendingUser(null); setUserForm(initialUserFormData); } 
+  };
+  const handleDeleteUser = async (userId: string) => { 
+      if (currentUser?.role !== 'admin') { setError("Only admins can delete users."); return; } 
+      if (userId === currentUser?.id) { setError("You cannot delete your own account."); return; } 
+      const newUsersList = users.filter(u => u.id !== userId);
+      setUsers(newUsersList); 
+      await cloudDataService.saveUsersToCloud(newUsersList);
+      const newAssignmentsList = assignments.filter(a => a.personId !== userId);
+      setAssignments(newAssignmentsList); 
+      await cloudDataService.saveAssignmentsToCloud(newAssignmentsList);
+      setSuccessMessage("User deleted successfully."); 
+      if(editingUserId === userId) { setEditingUserId(null); setUserForm(initialUserFormData); } 
+  };
+  const handleAddProgram = async (e: React.FormEvent) => { 
+      e.preventDefault(); clearMessages(); 
+      if (!programForm.name.trim()) { setError("Program name cannot be empty."); return; } 
+      const newProgramRec: Program = { ...programForm, id: Date.now().toString() }; 
+      const newProgramsList = [...programs, newProgramRec];
+      setPrograms(newProgramsList); 
+      await cloudDataService.saveProgramsToCloud(newProgramsList);
+      setProgramForm({ name: '', description: '' }); 
+      setSuccessMessage(`Program "${newProgramRec.name}" added successfully.`); 
+  };
+  const handleDeleteProgram = async (id: string) => { 
+      clearMessages(); 
+      const isProgramInUse = tasks.some(task => task.programId === id); 
+      let newTasksList = [...tasks];
+      if (isProgramInUse) { 
+          if (!window.confirm("This program is linked to tasks. Deleting it will unlink these tasks. Are you sure?")) { return; } 
+          newTasksList = tasks.map(task => task.programId === id ? {...task, programId: undefined, programName: undefined } : task);
+          setTasks(newTasksList);
+          await cloudDataService.saveTasksToCloud(newTasksList);
+      } 
+      const newProgramsList = programs.filter(p => p.id !== id);
+      setPrograms(newProgramsList); 
+      await cloudDataService.saveProgramsToCloud(newProgramsList);
+      setSuccessMessage("Program deleted successfully."); 
+  };
+  const handleAddTask = async (e: React.FormEvent) => { 
+      e.preventDefault(); clearMessages(); 
+      if (!taskForm.title.trim()) { setError("Task title cannot be empty."); return; } 
+      const program = programs.find(p => p.id === taskForm.programId); 
+      const newTaskRec: Task = { id: Date.now().toString(), title: taskForm.title, description: taskForm.description, requiredSkills: taskForm.requiredSkills, programId: taskForm.programId || undefined, programName: program ? program.name : undefined, deadline: taskForm.deadline || undefined }; 
+      const newTasksList = [...tasks, newTaskRec];
+      setTasks(newTasksList); 
+      await cloudDataService.saveTasksToCloud(newTasksList);
+      setTaskForm({ title: '', description: '', requiredSkills: '', programId: '', deadline: '' }); 
+      setSuccessMessage(`Task "${newTaskRec.title}" added successfully.`); 
+  };
+  const handleDeleteTask = async (id: string) => { 
+      clearMessages(); 
+      const newTasksList = tasks.filter(t => t.id !== id);
+      setTasks(newTasksList); 
+      await cloudDataService.saveTasksToCloud(newTasksList);
+      const newAssignmentsList = assignments.filter(a => a.taskId !== id);
+      setAssignments(newAssignmentsList);  
+      await cloudDataService.saveAssignmentsToCloud(newAssignmentsList);
+      setSuccessMessage("Task deleted successfully."); 
+  };
+
   const fetchAssignmentSuggestion = useCallback(async () => { if (!selectedTaskForAssignment) { setError("Please select a task first."); return; } const task = tasks.find(t => t.id === selectedTaskForAssignment); if (!task) { setError("Selected task not found."); return; } const activeUserIdsWithTasks = assignments .filter(a => a.status === 'pending_acceptance' || a.status === 'accepted_by_user') .map(a => a.personId); const trulyAvailableUsers = users.filter(u => u.role === 'user' && !activeUserIdsWithTasks.includes(u.id)); if (trulyAvailableUsers.length === 0) { setError("No users available to assign tasks to (either no users, or all users have active tasks)."); setAssignmentSuggestion({ suggestedPersonName: null, justification: "No users (non-admin) available without active tasks in the system." }); return; } setIsLoadingSuggestion(true); clearMessages(); setAssignmentSuggestion(null); try { const suggestion = await getAssignmentSuggestion(task, trulyAvailableUsers, programs, assignments); setAssignmentSuggestion(suggestion); if (!suggestion?.suggestedPersonName && suggestion?.justification) { setInfoMessage(suggestion.justification); } } catch (err) { console.error("Error fetching suggestion:", err); const errorMessage = err instanceof Error ? err.message : "An unknown error occurred."; setError(errorMessage); setAssignmentSuggestion({ suggestedPersonName: null, justification: errorMessage }); } finally { setIsLoadingSuggestion(false); }  }, [selectedTaskForAssignment, tasks, users, programs, assignments, clearMessages]);
   
   const handleConfirmAssignmentByAdmin = async () => {  
@@ -631,8 +762,10 @@ export const App = (): JSX.Element => {
     if (personStillHasActiveTask) { setError(`${person.displayName} already has an active task. Cannot assign another until their current task is completed or declined.`); return; } 
     if (assignments.find(a => a.taskId === task.id && (a.status !== 'declined_by_user' && a.status !== 'completed_admin_approved'))) { if (!window.confirm(`Task "${task.title}" is already assigned or pending. Reassign to ${person.displayName} (pending their acceptance)? This will clear previous active assignment for this task.`)) { return; } } 
     const assignmentDeadline = assignmentForm.specificDeadline || task.deadline; 
-    const newAssignment: Assignment = { taskId: task.id, personId: person.id, taskTitle: task.title, personName: person.displayName, justification: assignmentSuggestion.justification, status: 'pending_acceptance', deadline: assignmentDeadline }; 
-    setAssignments([...assignments.filter(a => a.taskId !== task.id || (a.status === 'declined_by_user' || a.status === 'completed_admin_approved')), newAssignment]); 
+    const newAssignmentRec: Assignment = { taskId: task.id, personId: person.id, taskTitle: task.title, personName: person.displayName, justification: assignmentSuggestion.justification, status: 'pending_acceptance', deadline: assignmentDeadline }; 
+    const newAssignmentsList = [...assignments.filter(a => a.taskId !== task.id || (a.status === 'declined_by_user' || a.status === 'completed_admin_approved')), newAssignmentRec];
+    setAssignments(newAssignmentsList); 
+    await cloudDataService.saveAssignmentsToCloud(newAssignmentsList);
     
     await emailService.sendTaskProposalEmail(person.email, person.displayName, task.title, currentUser.displayName, assignmentDeadline);
 
@@ -650,18 +783,19 @@ export const App = (): JSX.Element => {
     
     const adminToNotify = getAdminToNotify(assignment.personId ? users.find(u=>u.id === assignment.personId)?.referringAdminId : undefined);
     let adminNotificationMessage = '';
+    let updatedAssignmentsList: Assignment[];
 
     if (accepted) { 
-      const updatedAssignments = assignments.map((a, idx) => idx === assignmentIndex ? { ...a, status: 'accepted_by_user' as AssignmentStatus } : a ); 
-      setAssignments(updatedAssignments); 
+      updatedAssignmentsList = assignments.map((a, idx) => idx === assignmentIndex ? { ...a, status: 'accepted_by_user' as AssignmentStatus } : a ); 
       setSuccessMessage(`You have accepted the task: "${assignment.taskTitle}".`); 
       adminNotificationMessage = 'accepted';
     } else { 
-      const updatedAssignments = assignments.map((a, idx) => idx === assignmentIndex ? { ...a, status: 'declined_by_user' as AssignmentStatus } : a ); 
-      setAssignments(updatedAssignments); 
+      updatedAssignmentsList = assignments.map((a, idx) => idx === assignmentIndex ? { ...a, status: 'declined_by_user' as AssignmentStatus } : a ); 
       setSuccessMessage(`You have declined the task: "${assignment.taskTitle}".`); 
       adminNotificationMessage = 'declined';
     } 
+    setAssignments(updatedAssignmentsList);
+    await cloudDataService.saveAssignmentsToCloud(updatedAssignmentsList);
 
     if (adminToNotify && currentUser) {
         await emailService.sendTaskStatusUpdateToAdminEmail(adminToNotify.email, adminToNotify.displayName, currentUser.displayName, assignment.taskTitle, adminNotificationMessage);
@@ -675,8 +809,9 @@ export const App = (): JSX.Element => {
     const submissionDate = new Date(); 
     const isLate = assignment.deadline ? submissionDate > new Date(new Date(assignment.deadline).setHours(23, 59, 59, 999)) : false; 
     const newStatus: AssignmentStatus = isLate ? 'submitted_late' : 'submitted_on_time'; 
-    const updatedAssignments = assignments.map(a => a.taskId === assignment.taskId && a.personId === currentUser.id ? { ...a, status: newStatus, userSubmissionDate: submissionDate.toISOString(), userDelayReason: isLate ? delayReason : undefined, } : a ); 
-    setAssignments(updatedAssignments); 
+    const updatedAssignmentsList = assignments.map(a => a.taskId === assignment.taskId && a.personId === currentUser.id ? { ...a, status: newStatus, userSubmissionDate: submissionDate.toISOString(), userDelayReason: isLate ? delayReason : undefined, } : a ); 
+    setAssignments(updatedAssignmentsList); 
+    await cloudDataService.saveAssignmentsToCloud(updatedAssignmentsList);
     
     const adminToNotify = getAdminToNotify(currentUser.referringAdminId);
     if (adminToNotify) {
@@ -691,8 +826,9 @@ export const App = (): JSX.Element => {
   const handleAdminApproveCompletion = async (assignment: Assignment) => { 
     clearMessages(); 
     if (!currentUser || currentUser.role !== 'admin') { setError("Only admins can approve task completion."); return; } 
-    const updatedAssignments = assignments.map(a => a.taskId === assignment.taskId && a.personId === assignment.personId ? { ...a, status: 'completed_admin_approved' as AssignmentStatus } : a ); 
-    setAssignments(updatedAssignments); 
+    const updatedAssignmentsList = assignments.map(a => a.taskId === assignment.taskId && a.personId === assignment.personId ? { ...a, status: 'completed_admin_approved' as AssignmentStatus } : a ); 
+    setAssignments(updatedAssignmentsList); 
+    await cloudDataService.saveAssignmentsToCloud(updatedAssignmentsList);
     
     const userToNotify = users.find(u => u.id === assignment.personId); 
     if (userToNotify) {
@@ -701,12 +837,54 @@ export const App = (): JSX.Element => {
     setSuccessMessage(`Submission for task "${assignment.taskTitle}" by ${assignment.personName} has been approved. (Email simulation in console)`); 
   };
 
-  const handleAdminUnassignTask = (assignmentToClear: Assignment) => { if (!currentUser || currentUser.role !== 'admin') { setError("Action not permitted."); return; } setAssignments(assignments.filter(a => !(a.taskId === assignmentToClear.taskId && a.personId === assignmentToClear.personId))); setSuccessMessage(`Assignment "${assignmentToClear.taskTitle}" for ${assignmentToClear.personName} has been cleared/unassigned.`); };
-  const handleAddAdminLogEntry = async (e: React.FormEvent) => { e.preventDefault(); if (!adminLogText.trim() && !adminLogImageFile) { setError("Please provide some text or an image for the log entry."); return; } if (!currentUser || currentUser.role !== 'admin') return; setIsSubmittingLog(true); clearMessages(); let imagePreviewUrl: string | undefined = undefined; if (adminLogImageFile) { try { imagePreviewUrl = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result as string); reader.onerror = reject; reader.readAsDataURL(adminLogImageFile); }); } catch (err) { console.error("Error reading image file:", err); setError("Failed to read image file. Please try a different image or ensure it's not too large."); setIsSubmittingLog(false); return; } } const newLogEntry: AdminLogEntry = { id: Date.now().toString(), adminId: currentUser.id, adminDisplayName: currentUser.displayName, timestamp: new Date().toISOString(), logText: adminLogText.trim(), ...(imagePreviewUrl && { imagePreviewUrl }), }; setAdminLogs(prevLogs => [newLogEntry, ...prevLogs]); setAdminLogText(''); setAdminLogImageFile(null); const fileInput = document.getElementById('admin-log-image-file') as HTMLInputElement; if (fileInput) fileInput.value = ''; setSuccessMessage("Log entry added successfully."); setIsSubmittingLog(false); };
-  const handleDeleteAdminLogEntry = (logId: string) => { if (!currentUser || currentUser.role !== 'admin') return; setAdminLogs(prevLogs => prevLogs.filter(log => log.id !== logId)); setSuccessMessage("Log entry deleted."); };
+  const handleAdminUnassignTask = async (assignmentToClear: Assignment) => { 
+      if (!currentUser || currentUser.role !== 'admin') { setError("Action not permitted."); return; } 
+      const newAssignmentsList = assignments.filter(a => !(a.taskId === assignmentToClear.taskId && a.personId === assignmentToClear.personId));
+      setAssignments(newAssignmentsList); 
+      await cloudDataService.saveAssignmentsToCloud(newAssignmentsList);
+      setSuccessMessage(`Assignment "${assignmentToClear.taskTitle}" for ${assignmentToClear.personName} has been cleared/unassigned.`); 
+  };
+  const handleAddAdminLogEntry = async (e: React.FormEvent) => { 
+      e.preventDefault(); 
+      if (!adminLogText.trim() && !adminLogImageFile) { setError("Please provide some text or an image for the log entry."); return; } 
+      if (!currentUser || currentUser.role !== 'admin') return; 
+      setIsSubmittingLog(true); clearMessages(); 
+      let imagePreviewUrl: string | undefined = undefined; 
+      if (adminLogImageFile) { 
+          try { 
+              imagePreviewUrl = await new Promise((resolve, reject) => { 
+                  const reader = new FileReader(); 
+                  reader.onload = () => resolve(reader.result as string); 
+                  reader.onerror = reject; 
+                  reader.readAsDataURL(adminLogImageFile); 
+              }); 
+          } catch (err) { 
+              console.error("Error reading image file:", err); 
+              setError("Failed to read image file. Please try a different image or ensure it's not too large."); 
+              setIsSubmittingLog(false); return; 
+          } 
+      } 
+      const newLogEntryRec: AdminLogEntry = { id: Date.now().toString(), adminId: currentUser.id, adminDisplayName: currentUser.displayName, timestamp: new Date().toISOString(), logText: adminLogText.trim(), ...(imagePreviewUrl && { imagePreviewUrl }), }; 
+      const newAdminLogsList = [newLogEntryRec, ...adminLogs];
+      setAdminLogs(newAdminLogsList); 
+      await cloudDataService.saveAdminLogsToCloud(newAdminLogsList);
+      setAdminLogText(''); setAdminLogImageFile(null); 
+      const fileInput = document.getElementById('admin-log-image-file') as HTMLInputElement; 
+      if (fileInput) fileInput.value = ''; 
+      setSuccessMessage("Log entry added successfully."); 
+      setIsSubmittingLog(false); 
+  };
+  const handleDeleteAdminLogEntry = async (logId: string) => { 
+      if (!currentUser || currentUser.role !== 'admin') return; 
+      const newAdminLogsList = adminLogs.filter(log => log.id !== logId);
+      setAdminLogs(newAdminLogsList); 
+      await cloudDataService.saveAdminLogsToCloud(newAdminLogsList);
+      setSuccessMessage("Log entry deleted."); 
+  };
 
   const handleUserTourClose = (completed: boolean) => {
     if (currentUser && currentUser.role === 'user') {
+        // This localStorage item is specific to the tour and not part of cloudDataService
         localStorage.setItem(`hasCompletedUserTour_${currentUser.id}`, 'true');
     }
     setShowUserTour(false);
@@ -715,6 +893,14 @@ export const App = (): JSX.Element => {
     }
   };
 
+  if (isLoadingAppData) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-bground">
+        <LoadingSpinner />
+        <p className="text-primary mt-2">Loading application data...</p>
+      </div>
+    );
+  }
 
   const renderNewAuthLoginPage = () => (
     <div className="w-full max-w-sm space-y-6">
@@ -849,6 +1035,12 @@ export const App = (): JSX.Element => {
   const renderPage = () => {
     if (!currentUser) { 
       console.error("Error: renderPage called without currentUser, but auth/pre-reg flow should handle this.");
+      // This path should ideally not be hit if routing logic is correct and data is loaded.
+      // If hit, it might be during initial load or a state inconsistency.
+      // Navigating to login or showing spinner is a safe fallback.
+       if (window.location.hash !== `#${Page.Login}` && window.location.hash !== `#${Page.PreRegistration}`) {
+         navigateTo(Page.Login);
+       }
       return <LoadingSpinner />; 
     }
     
@@ -922,7 +1114,9 @@ export const App = (): JSX.Element => {
       />
     );
   }
-  if (!currentUser) { // Fallback for any other page if no user (should be handled by useEffect)
+  if (!currentUser) { 
+    // This will show if not on Login/PreReg and no currentUser (e.g. after data load but before hash processing redirects)
+    // Or if hash processing logic somehow fails to redirect to login when currentUser is null.
     return renderAuthContainer(renderNewAuthLoginPage());
   }
   
@@ -978,6 +1172,7 @@ export const App = (): JSX.Element => {
       </main>
       <footer className="bg-neutral text-center py-4 text-sm text-gray-300">
         <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. All rights reserved. AI Powered.</p>
+        <p className="text-xs text-gray-400 mt-1">Data is currently stored locally in your browser. For internet-accessible storage, integration with a backend service is required.</p>
       </footer>
     </div>
   );
