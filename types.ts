@@ -29,12 +29,13 @@ export interface User {
 
 export interface PendingUser {
   id: string;
-  uniqueId: string; // User's chosen ID during pre-registration
+  uniqueId: string; 
   displayName:string;
+  email: string; 
+  password: string; 
+  role: Role; // Intended role from registration
   submissionDate: string;
-  referringAdminId: string; // ID of the admin who generated the pre-reg link
-  email?: string; // User's email, set during pre-registration
-  password?: string; // User's password, set during pre-registration
+  referringAdminId?: string; // Optional: ID of admin who generated pre-reg link, or system if general reg.
 }
 
 export interface Program {
