@@ -2,18 +2,28 @@
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { Task, User, Program, GeminiSuggestion, Assignment } from '../types';
 
-const API_KEY = process.env.GEMINI_API_KEY;
+// Directly use process.env.API_KEY.
+// It's assumed that the execution environment (e.g., build process)
+// will make this variable available, often from a .env file.
+// The typeof checks are a safeguard for client-side environments where 'process'
+// might not be defined unless a build tool specifically provides it.
+const apiKey: string | undefined = (typeof process !== 'undefined' && process.env && process.env.API_KEY)
+    ? process.env.API_KEY
+    : undefined;
 
-if (!API_KEY) {
-  console.error("API_KEY environment variable is not set.");
+if (!apiKey) {
+  console.error("API_KEY environment variable is not set or accessible. Gemini API functionalities will be unavailable. Please ensure your build process or execution environment defines process.env.API_KEY (e.g., from your .env file or other configuration source).");
 }
 
-const ai = new GoogleGenAI({ apiKey: API_KEY! });
+// Initialize GoogleGenAI. The apiKey property is optional.
+// If apiKey is undefined (i.e., not set in the environment), the SDK will be initialized without it.
+// Subsequent API calls that require an API key will likely fail, which is the expected behavior.
+const ai = new GoogleGenAI({ apiKey: apiKey });
 
 // Updated to accept assignments to filter users
 export const getAssignmentSuggestion = async (task: Task, users: User[], programs: Program[], assignments: Assignment[]): Promise<GeminiSuggestion | null> => {
-  if (!API_KEY) {
-    return { suggestedPersonName: null, justification: "API key not configured. Please contact an administrator." };
+  if (!apiKey) { // Check if API key is available before making a call.
+    return { suggestedPersonName: null, justification: "AI suggestions are unavailable: API key is not configured. Please check environment configuration or contact an administrator." };
   }
   
   const model = 'gemini-2.5-flash-preview-04-17';
@@ -77,8 +87,8 @@ export const getAssignmentSuggestion = async (task: Task, users: User[], program
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.4, 
-      },
+        temperature: 0.4 
+      } 
     });
 
     let jsonStr = response.text.trim();
@@ -101,9 +111,12 @@ export const getAssignmentSuggestion = async (task: Task, users: User[], program
     if (error instanceof Error) {
       errorMessage += error.message;
     }
+    // More specific error handling for common issues
     if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') {
         if (error.message.includes(' हरिनाम') || error.message.toLowerCase().includes('safety') || error.message.toLowerCase().includes('blocked')) {
             errorMessage = "AI suggestion was declined or blocked, possibly due to safety settings or content policies. Please try rephrasing or contact support if this persists.";
+        } else if (error.message.toLowerCase().includes('api key') || error.message.toLowerCase().includes('authentication')) {
+             errorMessage = "AI suggestions are unavailable: API key is invalid, missing, or caused an authentication error. Please contact an administrator.";
         }
     }
     return { suggestedPersonName: null, justification: errorMessage };
