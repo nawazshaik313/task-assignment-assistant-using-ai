@@ -866,7 +866,7 @@ export const App = (): JSX.Element => {
           {authView === 'login' ? renderNewAuthLoginPage() : renderNewAuthRegisterPage()}
         </div>
          <footer className="text-center py-6 text-sm text-neutral mt-auto">
-          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by AI.</p>
+          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by SHAIK MOHAMMED NAWAZ.</p>
           <p className="text-xs mt-1">Note: This is a demo application. Email/SMS notifications are simulated and not actually sent.</p>
         </footer>
       </div>

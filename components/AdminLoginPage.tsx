@@ -61,7 +61,7 @@ const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onLogin }) => {
         </form>
       </div>
       <footer className="text-center py-6 text-sm text-neutral mt-auto">
-          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by AI.</p>
+          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by SHAIK MOHAMMED NAWAZ.</p>
       </footer>
     </div>
   );
