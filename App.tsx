@@ -151,7 +151,7 @@ export const App = (): JSX.Element => {
         ] = await Promise.all([
           cloudDataService.loadUsersFromCloud(),
           cloudDataService.loadPendingUsersFromCloud(),
-          const loadedTasks = await fetch("http://localhost:5000/api/taskshttps://task-assignment-assistant-using-ai.onrender.com/").then(res => res.json());,
+          const loadedTasks = await fetch("https://task-assignment-assistant-using-ai.onrender.com/").then(res => res.json());,
           cloudDataService.loadProgramsFromCloud(),
           cloudDataService.loadAssignmentsFromCloud(),
           cloudDataService.loadAdminLogsFromCloud(),
