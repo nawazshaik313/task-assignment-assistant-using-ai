@@ -142,21 +142,26 @@ export const App = (): JSX.Element => {
 
   // Load initial data
   useEffect(() => {
-    const loadData = async () => {
-      setIsLoadingAppData(true);
-      try {
-        const [
-          loadedUsers, loadedPendingUsers, loadedTasks, loadedPrograms, 
-          loadedAssignments, loadedAdminLogs, loadedCurrentUser
-        ] = await Promise.all([
-          cloudDataService.loadUsersFromCloud(),
-          cloudDataService.loadPendingUsersFromCloud(),
-          const loadedTasks = await fetch("https://task-assignment-assistant-using-ai.onrender.com").then(res => res.json());,
-          cloudDataService.loadProgramsFromCloud(),
-          cloudDataService.loadAssignmentsFromCloud(),
-          cloudDataService.loadAdminLogsFromCloud(),
-          cloudDataService.loadCurrentUserFromCloud()
-        ]);
+const loadData = async () => {
+setIsLoadingAppData(true);
+try {
+const [
+loadedUsers,
+loadedPendingUsers,
+loadedTasks,
+loadedPrograms,
+loadedAssignments,
+loadedAdminLogs,
+loadedCurrentUser
+] = await Promise.all([
+cloudDataService.loadUsersFromCloud(),
+cloudDataService.loadPendingUsersFromCloud(),
+fetch("https://task-assignment-assistant-using-ai.onrender.com").then(res => res.json()),
+cloudDataService.loadProgramsFromCloud(),
+cloudDataService.loadAssignmentsFromCloud(),
+cloudDataService.loadAdminLogsFromCloud(),
+cloudDataService.loadCurrentUserFromCloud()
+]);
         setUsers(loadedUsers);
         setPendingUsers(loadedPendingUsers);
         setTasks(loadedTasks);
