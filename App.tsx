@@ -3,8 +3,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Page, User, Role, Task, Assignment, Program, GeminiSuggestion, NotificationPreference, AssignmentStatus, PendingUser, AdminLogEntry } from './types';
 import useLocalStorage from './hooks/useLocalStorage';
 import { getAssignmentSuggestion } from './services/geminiService';
-import * as emailService from './utils/emailService'; // Corrected path
-import { validatePassword } from './utils/validation'; // Import password validation
+import * as emailService from './src/utils/emailService'; // Corrected path
+import { validatePassword } from './src/utils/validation'; // Import password validation
 import * as cloudDataService from './services/cloudDataService'; // Import the new service
 import LoadingSpinner from './components/LoadingSpinner';
 import { UsersIcon, ClipboardListIcon, LightBulbIcon, CheckCircleIcon, TrashIcon, PlusCircleIcon, KeyIcon, BriefcaseIcon, LogoutIcon, UserCircleIcon } from './components/Icons';
@@ -1091,7 +1091,7 @@ export const App = (): JSX.Element => {
         {children}
       </div>
       <footer className="text-center py-6 text-sm text-neutral mt-auto">
-        <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by AI.</p>
+        <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by SHAIK MOHAMMED NAWAZ.</p>
       </footer>
     </div>
   );
@@ -1171,7 +1171,7 @@ export const App = (): JSX.Element => {
         {renderPage()}
       </main>
       <footer className="bg-neutral text-center py-4 text-sm text-gray-300">
-        <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. All rights reserved. AI Powered.</p>
+        <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. All rights reserved.  Powered By SHAIK MOHAMMED NAWAZ.</p>
         <p className="text-xs text-gray-400 mt-1">Data is currently stored locally in your browser. For internet-accessible storage, integration with a backend service is required.</p>
       </footer>
     </div>
