@@ -142,42 +142,65 @@ export const App = (): JSX.Element => {
 
   // Load initial data
   useEffect(() => {
-const loadData = async () => {
-setIsLoadingAppData(true);
-try {
-const [
-loadedUsers,
-loadedPendingUsers,
-loadedTasks,
-loadedPrograms,
-loadedAssignments,
-loadedAdminLogs,
-loadedCurrentUser
-] = await Promise.all([
-cloudDataService.loadUsersFromCloud(),
-cloudDataService.loadPendingUsersFromCloud(),
-fetch("https://task-assignment-assistant-using-ai.onrender.com").then(res => res.json()),
-cloudDataService.loadProgramsFromCloud(),
-cloudDataService.loadAssignmentsFromCloud(),
-cloudDataService.loadAdminLogsFromCloud(),
-cloudDataService.loadCurrentUserFromCloud()
-]);
-        setUsers(loadedUsers);
-        setPendingUsers(loadedPendingUsers);
-        setTasks(loadedTasks);
-        setPrograms(loadedPrograms);
-        setAssignments(loadedAssignments);
-        setAdminLogs(loadedAdminLogs);
-        setCurrentUser(loadedCurrentUser);
-      } catch (err) {
-        console.error("Failed to load app data:", err);
-        setError("Could not load application data. Please try refreshing.");
-      } finally {
-        setIsLoadingAppData(false);
-      }
-    };
-    loadData();
-  }, []);
+  const loadData = async () => {
+    setIsLoadingAppData(true);
+    try {
+      const [
+        loadedUsers,
+        loadedPendingUsers,
+        loadedTasks,
+        loadedPrograms,
+        loadedAssignments,
+        loadedAdminLogs,
+        loadedCurrentUser
+      ] = await Promise.all([
+        cloudDataService.loadUsersFromCloud(),
+        cloudDataService.loadPendingUsersFromCloud(),
+        fetch("https://task-management-backend-17a5.onrender.com/api/tasks")
+          .then(res => res.json())
+          .then(data => {
+            console.log("Fetched tasks:", data);
+            setTasks(data);
+          })
+          .catch(err => console.error("Error fetching tasks:", err)),
+        cloudDataService.loadProgramsFromCloud(),
+        cloudDataService.loadAssignmentsFromCloud(),
+        cloudDataService.loadAdminLogsFromCloud(),
+        cloudDataService.loadCurrentUserFromCloud()
+      ]);
+
+      // ...rest of loadData logic...
+    } catch (err) {
+      console.error("Error in loadData:", err);
+    } finally {
+      setIsLoadingAppData(false);
+    }
+  };
+
+  loadData();
+}, []);
+
+
+const createTestTask = () => {
+  fetch("https://task-management-backend-17a5.onrender.com/api/tasks", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      title: "Test Task",
+      assignedTo: "User A",
+      status: "pending",
+    }),
+  })
+    .then(res => res.json())
+    .then(data => {
+      console.log("Task created:", data);
+      setTasks(prev => [...prev, data]); // update task list
+    })
+    .catch(err => console.error("Error creating task:", err));
+};
+
 
   // Wrapper for setPreRegistrationForm to persist to localStorage
   const setPreRegistrationForm = (value: React.SetStateAction<typeof initialPreRegistrationFormState>) => {
@@ -1055,6 +1078,7 @@ cloudDataService.loadCurrentUserFromCloud()
        }
       return <LoadingSpinner />; 
     }
+    <button onClick={createTestTask}>Create Test Task</button>
     
     switch (currentPage) {
       case Page.Dashboard: const isAdminDashboard = currentUser.role === 'admin'; return ( <div> <div className="text-center"> <h2 className="text-3xl font-semibold mb-4 text-primary">Welcome, {currentUser.displayName}!</h2> <p className="text-lg text-neutral">Select an option from the navigation to get started.</p> <p className="mt-2 text-md text-neutral">Your role: <span className="font-semibold capitalize">{currentUser.role}</span>. Position: <span className="font-semibold">{currentUser.position}</span></p> <p className="text-sm text-neutral">Logged in as: {currentUser.email} (System ID: {currentUser.uniqueId})</p> </div> {isAdminDashboard && ( <div className="mt-8 pt-6 border-t border-gray-300"> <h3 className="text-xl font-semibold mb-4 text-secondary flex items-center"> <ClipboardListIcon className="w-6 h-6 mr-2" /> Admin Activity Log </h3> <form onSubmit={handleAddAdminLogEntry} className="bg-surface shadow-md rounded-lg p-4 mb-6 space-y-3"> <FormTextarea id="admin-log-text" label="New Log Entry / Announcement" value={adminLogText} onChange={(e) => setAdminLogText(e.target.value)} placeholder="Enter log details, an announcement, or a note..." aria-label="New log entry text" /> <div> <label htmlFor="admin-log-image-file" className="block text-sm font-medium text-textlight">Attach Photo (Optional)</label> <input id="admin-log-image-file" type="file" accept="image/*" onChange={(e) => setAdminLogImageFile(e.target.files ? e.target.files[0] : null)} className="mt-1 block w-full text-sm text-neutral file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-white hover:file:bg-blue-600" aria-label="Attach photo to log entry" /> </div> {adminLogImageFile && ( <div className="mt-2 text-xs text-neutral">Selected file: {adminLogImageFile.name}</div> )} <button type="submit" className="btn-secondary" disabled={isSubmittingLog || (!adminLogText.trim() && !adminLogImageFile)}> {isSubmittingLog ? 'Adding Log...' : 'Add Log Entry'} </button> </form> {adminLogs.length === 0 ? ( <p className="text-neutral">No activity logs yet.</p> ) : ( <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2 bg-gray-50 p-4 rounded-lg shadow-inner"> {adminLogs.map(log => ( <div key={log.id} className="bg-surface shadow rounded-lg p-4 relative"> <button onClick={() => handleDeleteAdminLogEntry(log.id)} className="absolute top-2 right-2 text-danger hover:text-red-700 p-1 transition-colors" aria-label={`Delete log entry made on ${new Date(log.timestamp).toLocaleString()}`} > <TrashIcon className="w-4 h-4" /> </button> <p className="text-xs text-neutral mb-1"> Posted by: <strong className="text-textlight">{log.adminDisplayName}</strong> </p> <p className="text-xs text-neutral"> {new Date(log.timestamp).toLocaleString()} </p> {log.logText && <p className="text-textlight mt-2 whitespace-pre-wrap">{log.logText}</p>} {log.imagePreviewUrl && ( <div className="mt-3"> <img src={log.imagePreviewUrl} alt={`Log attachment by ${log.adminDisplayName} on ${new Date(log.timestamp).toLocaleDateString()}`} className="max-w-full h-auto rounded-md border border-gray-200" style={{ maxHeight: '300px' }} /> </div> )} </div> ))} </div> )} </div> )} </div> );
