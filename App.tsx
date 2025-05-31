@@ -154,8 +154,10 @@ export const App = (): JSX.Element => {
         loadedAdminLogs,
         loadedCurrentUser
       ] = await Promise.all([
-        cloudDataService.loadUsersFromCloud(),
-        cloudDataService.loadPendingUsersFromCloud(),
+        fetch("https://task-management-backend-17a5.onrender.com/api/users")
+  .then(res => res.json()),
+       fetch("https://task-management-backend-17a5.onrender.com/api/pending-users")
+  .then(res => res.json()),
         fetch("https://task-management-backend-17a5.onrender.com/api/tasks")
           .then(res => res.json())
           .then(data => {
@@ -163,10 +165,11 @@ export const App = (): JSX.Element => {
             setTasks(data);
           })
           .catch(err => console.error("Error fetching tasks:", err)),
-        cloudDataService.loadProgramsFromCloud(),
-        cloudDataService.loadAssignmentsFromCloud(),
-        cloudDataService.loadAdminLogsFromCloud(),
-        cloudDataService.loadCurrentUserFromCloud()
+        fetch("https://task-management-backend-17a5.onrender.com/api/programs").then(res => res.json()),
+        fetch("https://task-management-backend-17a5.onrender.com/api/assignments").then(res => res.json()),
+        fetch("https://task-management-backend-17a5.onrender.com/api/admin-logs").then(res => res.json()),
+        fetch("https://task-management-backend-17a5.onrender.com/api/current-user").then(res => res.json())
+       
       ]);
 
       // ...rest of loadData logic...
@@ -436,7 +439,27 @@ const createTestTask = () => {
         return;
     }
 
-    const user = users.find(u => u.email === emailToLogin); 
+    try {
+  const response = await fetch("https://task-management-backend-17a5.onrender.com/api/users/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: emailToLogin, password: passwordToLogin }),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    setError(data.error || "Login failed.");
+    return;
+  }
+
+  setCurrentUser(data.user);
+  setNewLoginForm({ email: '', password: '' });
+  setSuccessMessage(`Login successful! Welcome back, ${data.user.displayName}`);
+} catch (err) {
+  console.error("Login error:", err);
+  setError("Server error. Please try again later.");
+}
+ 
     if (user) { 
       if (user.password === passwordToLogin) { 
         setCurrentUser(user); 
