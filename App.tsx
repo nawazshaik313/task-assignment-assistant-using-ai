@@ -363,7 +363,14 @@ const createTestTask = () => {
         };
         const updatedUsers = [...users, newAdminUser];
         setUsers(updatedUsers);
-        await cloudDataService.saveUsersToCloud(updatedUsers);
+        await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(updatedUsers),
+});
+
         await emailService.sendWelcomeRegistrationEmail(newAdminUser.email, newAdminUser.displayName, newAdminUser.role);
         setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user' });
         setSuccessMessage(`Administrator account for ${name} created successfully! Please login. (Email simulation in console)`);
@@ -384,7 +391,14 @@ const createTestTask = () => {
         };
         const updatedUsers = [...users, newAdminUser];
         setUsers(updatedUsers);
-        await cloudDataService.saveUsersToCloud(updatedUsers);
+        await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(updatedUsers),
+});
+
         await emailService.sendWelcomeRegistrationEmail(newAdminUser.email, newAdminUser.displayName, newAdminUser.role);
         setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user' });
         setSuccessMessage(`New Administrator account for ${name} created! Please login. (Email simulation in console)`);
@@ -413,7 +427,11 @@ const createTestTask = () => {
 
         const updatedPendingUsers = [...pendingUsers, newPendingUser];
         setPendingUsers(updatedPendingUsers);
-        await cloudDataService.savePendingUsersToCloud(updatedPendingUsers);
+        await fetch("https://task-management-backend-17a5.onrender.com/api/pending-users", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(updatedPendingUsers),
+})
         
         await emailService.sendRegistrationPendingToUserEmail(newPendingUser.email, newPendingUser.displayName);
         
@@ -463,7 +481,13 @@ const createTestTask = () => {
     if (user) { 
       if (user.password === passwordToLogin) { 
         setCurrentUser(user); 
-        await cloudDataService.saveCurrentUserToCloud(user);
+        await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(user),
+});
         setNewLoginForm({ email: '', password: '' }); 
         setSuccessMessage(`Login successful! Welcome back, ${user.displayName}.`); 
         // Navigation and tour logic handled by useEffect based on currentUser update
@@ -533,8 +557,11 @@ const createTestTask = () => {
     };
     const updatedPendingUsers = [...pendingUsers, newPendingUser];
     setPendingUsers(updatedPendingUsers);
-    await cloudDataService.savePendingUsersToCloud(updatedPendingUsers);
-
+    await fetch("https://task-management-backend-17a5.onrender.com/api/pending-users", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(updatedPendingUsers),
+})
     await emailService.sendPreRegistrationSubmittedToUserEmail(
         newPendingUser.email!, 
         newPendingUser.displayName,
@@ -559,7 +586,14 @@ const createTestTask = () => {
   const handleLogout = async () => { 
       clearMessages(); 
       setCurrentUser(null); 
-      await cloudDataService.saveCurrentUserToCloud(null);
+      await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(null),
+});
+
       setNewLoginForm({ email: '', password: '' }); 
       setAuthView('login'); 
       setPreRegistrationForm(initialPreRegistrationFormState); 
@@ -601,9 +635,23 @@ const createTestTask = () => {
     }; 
     const updatedUsers = users.map(u => (u.id === currentUser.id ? updatedUser : u));
     setUsers(updatedUsers); 
-    await cloudDataService.saveUsersToCloud(updatedUsers);
+    await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(updatedUsers),
+});
+
     setCurrentUser(updatedUser); 
-    await cloudDataService.saveCurrentUserToCloud(updatedUser);
+    await fetch("https://task-management-backend-17a5.onrender.com/api/users/current", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(updatedUser),
+});
+
     setUserForm(prev => ({ ...prev, password: '', confirmPassword: '' })); 
     setSuccessMessage("Profile updated successfully."); 
     navigateTo(currentUser.role === 'admin' ? Page.Dashboard : Page.ViewAssignments); 
@@ -678,7 +726,13 @@ const createTestTask = () => {
       }; 
       const newUsersList = users.map(u => u.id === editingUserId ? updatedUserRec : u);
       setUsers(newUsersList); 
-      await cloudDataService.saveUsersToCloud(newUsersList);
+      await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(newUsersList),
+});
       setSuccessMessage(`User '${updatedUserRec.displayName}' updated successfully.`); 
     } else { 
       const newUserRec: User = { 
@@ -696,12 +750,25 @@ const createTestTask = () => {
       }; 
       const newUsersList = [...users, newUserRec];
       setUsers(newUsersList); 
-      await cloudDataService.saveUsersToCloud(newUsersList);
+      await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(newUsersList),
+});
 
       if (approvingPendingUser) { 
         const newPendingUsersList = pendingUsers.filter(pu => pu.id !== approvingPendingUser.id);
         setPendingUsers(newPendingUsersList); 
-        await cloudDataService.savePendingUsersToCloud(newPendingUsersList);
+        await fetch("https://task-management-backend-17a5.onrender.com/api/pending-users", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(newPendingUsersList),
+});
+
         await emailService.sendAccountActivatedByAdminEmail(newUserRec.email, newUserRec.displayName, adminActor.displayName);
         setSuccessMessage(`User '${newUserRec.displayName}' approved from pending list. Account activated. (Email simulation in console)`); 
       } else { 
@@ -745,7 +812,14 @@ const createTestTask = () => {
   const handleRejectPendingUser = async (pendingUserId: string) => { 
       const newPendingUsersList = pendingUsers.filter(pu => pu.id !== pendingUserId);
       setPendingUsers(newPendingUsersList); 
-      await cloudDataService.savePendingUsersToCloud(newPendingUsersList);
+      await fetch("https://task-management-backend-17a5.onrender.com/api/pending-users", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(newPendingUsersList),
+});
+
       setSuccessMessage("Pending user request rejected."); 
       if (approvingPendingUser?.id === pendingUserId) { setApprovingPendingUser(null); setUserForm(initialUserFormData); } 
   };
@@ -754,10 +828,22 @@ const createTestTask = () => {
       if (userId === currentUser?.id) { setError("You cannot delete your own account."); return; } 
       const newUsersList = users.filter(u => u.id !== userId);
       setUsers(newUsersList); 
-      await cloudDataService.saveUsersToCloud(newUsersList);
+      await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(newUsersList),
+});
       const newAssignmentsList = assignments.filter(a => a.personId !== userId);
       setAssignments(newAssignmentsList); 
-      await cloudDataService.saveAssignmentsToCloud(newAssignmentsList);
+      await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(newAssignmentsList),
+});
       setSuccessMessage("User deleted successfully."); 
       if(editingUserId === userId) { setEditingUserId(null); setUserForm(initialUserFormData); } 
   };
@@ -767,7 +853,13 @@ const createTestTask = () => {
       const newProgramRec: Program = { ...programForm, id: Date.now().toString() }; 
       const newProgramsList = [...programs, newProgramRec];
       setPrograms(newProgramsList); 
-      await cloudDataService.saveProgramsToCloud(newProgramsList);
+      await fetch("https://task-management-backend-17a5.onrender.com/api/programs", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(newProgramsList),
+});
       setProgramForm({ name: '', description: '' }); 
       setSuccessMessage(`Program "${newProgramRec.name}" added successfully.`); 
   };
@@ -779,11 +871,23 @@ const createTestTask = () => {
           if (!window.confirm("This program is linked to tasks. Deleting it will unlink these tasks. Are you sure?")) { return; } 
           newTasksList = tasks.map(task => task.programId === id ? {...task, programId: undefined, programName: undefined } : task);
           setTasks(newTasksList);
-          await cloudDataService.saveTasksToCloud(newTasksList);
+          await fetch("https://task-management-backend-17a5.onrender.com/api/tasks", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(newTasksList),
+});
       } 
       const newProgramsList = programs.filter(p => p.id !== id);
       setPrograms(newProgramsList); 
-      await cloudDataService.saveProgramsToCloud(newProgramsList);
+      await fetch("https://task-management-backend-17a5.onrender.com/api/programs", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(newProgramsList),
+});
       setSuccessMessage("Program deleted successfully."); 
   };
   const handleAddTask = async (e: React.FormEvent) => { 
@@ -793,7 +897,13 @@ const createTestTask = () => {
       const newTaskRec: Task = { id: Date.now().toString(), title: taskForm.title, description: taskForm.description, requiredSkills: taskForm.requiredSkills, programId: taskForm.programId || undefined, programName: program ? program.name : undefined, deadline: taskForm.deadline || undefined }; 
       const newTasksList = [...tasks, newTaskRec];
       setTasks(newTasksList); 
-      await cloudDataService.saveTasksToCloud(newTasksList);
+      await fetch("https://task-management-backend-17a5.onrender.com/api/tasks", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(newTasksList),
+});
       setTaskForm({ title: '', description: '', requiredSkills: '', programId: '', deadline: '' }); 
       setSuccessMessage(`Task "${newTaskRec.title}" added successfully.`); 
   };
@@ -801,10 +911,22 @@ const createTestTask = () => {
       clearMessages(); 
       const newTasksList = tasks.filter(t => t.id !== id);
       setTasks(newTasksList); 
-      await cloudDataService.saveTasksToCloud(newTasksList);
+      await fetch("https://task-management-backend-17a5.onrender.com/api/tasks", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(newTasksList),
+});
       const newAssignmentsList = assignments.filter(a => a.taskId !== id);
       setAssignments(newAssignmentsList);  
-      await cloudDataService.saveAssignmentsToCloud(newAssignmentsList);
+      await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(newAssignmentsList),
+});
       setSuccessMessage("Task deleted successfully."); 
   };
 
@@ -823,7 +945,13 @@ const createTestTask = () => {
     const newAssignmentRec: Assignment = { taskId: task.id, personId: person.id, taskTitle: task.title, personName: person.displayName, justification: assignmentSuggestion.justification, status: 'pending_acceptance', deadline: assignmentDeadline }; 
     const newAssignmentsList = [...assignments.filter(a => a.taskId !== task.id || (a.status === 'declined_by_user' || a.status === 'completed_admin_approved')), newAssignmentRec];
     setAssignments(newAssignmentsList); 
-    await cloudDataService.saveAssignmentsToCloud(newAssignmentsList);
+    await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(newAssignmentsList),
+});
     
     await emailService.sendTaskProposalEmail(person.email, person.displayName, task.title, currentUser.displayName, assignmentDeadline);
 
@@ -853,7 +981,14 @@ const createTestTask = () => {
       adminNotificationMessage = 'declined';
     } 
     setAssignments(updatedAssignmentsList);
-    await cloudDataService.saveAssignmentsToCloud(updatedAssignmentsList);
+    await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(updatedAssignmentsList),
+});
+
 
     if (adminToNotify && currentUser) {
         await emailService.sendTaskStatusUpdateToAdminEmail(adminToNotify.email, adminToNotify.displayName, currentUser.displayName, assignment.taskTitle, adminNotificationMessage);
@@ -869,7 +1004,14 @@ const createTestTask = () => {
     const newStatus: AssignmentStatus = isLate ? 'submitted_late' : 'submitted_on_time'; 
     const updatedAssignmentsList = assignments.map(a => a.taskId === assignment.taskId && a.personId === currentUser.id ? { ...a, status: newStatus, userSubmissionDate: submissionDate.toISOString(), userDelayReason: isLate ? delayReason : undefined, } : a ); 
     setAssignments(updatedAssignmentsList); 
-    await cloudDataService.saveAssignmentsToCloud(updatedAssignmentsList);
+    await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(updatedAssignmentsList),
+});
+
     
     const adminToNotify = getAdminToNotify(currentUser.referringAdminId);
     if (adminToNotify) {
@@ -886,7 +1028,14 @@ const createTestTask = () => {
     if (!currentUser || currentUser.role !== 'admin') { setError("Only admins can approve task completion."); return; } 
     const updatedAssignmentsList = assignments.map(a => a.taskId === assignment.taskId && a.personId === assignment.personId ? { ...a, status: 'completed_admin_approved' as AssignmentStatus } : a ); 
     setAssignments(updatedAssignmentsList); 
-    await cloudDataService.saveAssignmentsToCloud(updatedAssignmentsList);
+    await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(updatedAssignmentsList),
+});
+
     
     const userToNotify = users.find(u => u.id === assignment.personId); 
     if (userToNotify) {
@@ -899,7 +1048,13 @@ const createTestTask = () => {
       if (!currentUser || currentUser.role !== 'admin') { setError("Action not permitted."); return; } 
       const newAssignmentsList = assignments.filter(a => !(a.taskId === assignmentToClear.taskId && a.personId === assignmentToClear.personId));
       setAssignments(newAssignmentsList); 
-      await cloudDataService.saveAssignmentsToCloud(newAssignmentsList);
+      await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(newAssignmentsList),
+});
       setSuccessMessage(`Assignment "${assignmentToClear.taskTitle}" for ${assignmentToClear.personName} has been cleared/unassigned.`); 
   };
   const handleAddAdminLogEntry = async (e: React.FormEvent) => { 
@@ -925,7 +1080,14 @@ const createTestTask = () => {
       const newLogEntryRec: AdminLogEntry = { id: Date.now().toString(), adminId: currentUser.id, adminDisplayName: currentUser.displayName, timestamp: new Date().toISOString(), logText: adminLogText.trim(), ...(imagePreviewUrl && { imagePreviewUrl }), }; 
       const newAdminLogsList = [newLogEntryRec, ...adminLogs];
       setAdminLogs(newAdminLogsList); 
-      await cloudDataService.saveAdminLogsToCloud(newAdminLogsList);
+      await fetch("https://task-management-backend-17a5.onrender.com/api/adminLogs", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(newAdminLogsList),
+});
+
       setAdminLogText(''); setAdminLogImageFile(null); 
       const fileInput = document.getElementById('admin-log-image-file') as HTMLInputElement; 
       if (fileInput) fileInput.value = ''; 
@@ -936,7 +1098,14 @@ const createTestTask = () => {
       if (!currentUser || currentUser.role !== 'admin') return; 
       const newAdminLogsList = adminLogs.filter(log => log.id !== logId);
       setAdminLogs(newAdminLogsList); 
-      await cloudDataService.saveAdminLogsToCloud(newAdminLogsList);
+      await fetch("https://task-management-backend-17a5.onrender.com/api/adminLogs", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(newAdminLogsList),
+});
+
       setSuccessMessage("Log entry deleted."); 
   };
 
