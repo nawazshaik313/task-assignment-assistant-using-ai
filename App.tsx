@@ -3,9 +3,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Page, User, Role, Task, Assignment, Program, GeminiSuggestion, NotificationPreference, AssignmentStatus, PendingUser, AdminLogEntry } from './types';
 import useLocalStorage from './hooks/useLocalStorage';
 import { getAssignmentSuggestion } from './services/geminiService';
-import * as emailService from './src/utils/emailService'; // Corrected path
-import { validatePassword } from './src/utils/validation'; // Import password validation
-import * as cloudDataService from './services/cloudDataService'; // Import the new service
+import * as emailService from './utils/emailService'; // Corrected path
+import { validatePassword } from './utils/validation'; // Corrected path
+// import * as cloudDataService from './services/cloudDataService'; // Removed unused import
 import LoadingSpinner from './components/LoadingSpinner';
 import { UsersIcon, ClipboardListIcon, LightBulbIcon, CheckCircleIcon, TrashIcon, PlusCircleIcon, KeyIcon, BriefcaseIcon, LogoutIcon, UserCircleIcon } from './components/Icons';
 import PreRegistrationFormPage from './components/PreRegistrationFormPage';
@@ -83,7 +83,6 @@ const passwordRequirementsText = "Must be at least 8 characters and include an u
 export const App = (): JSX.Element => {
   const [currentPage, _setCurrentPageInternal] = useState<Page>(Page.Login); 
   
-  // State management with useState, data loaded from cloudDataService
   const [users, setUsers] = useState<User[]>([]);
   const [pendingUsers, setPendingUsers] = useState<PendingUser[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -105,7 +104,6 @@ export const App = (): JSX.Element => {
   });
   
   const [adminRegistrationForm, setAdminRegistrationForm] = useState(initialAdminRegistrationState);
-  // preRegistrationForm still uses useLocalStorage for transient client-side state
   const [preRegistrationForm, setPreRegistrationFormInternal] = useLocalStorage('task-assign-preRegistrationForm',initialPreRegistrationFormState);
   
   const initialUserFormData = { 
@@ -140,48 +138,78 @@ export const App = (): JSX.Element => {
   
   const [showUserTour, setShowUserTour] = useState<boolean>(false);
 
-  // Load initial data
   useEffect(() => {
-  const loadData = async () => {
-    setIsLoadingAppData(true);
-    try {
-      const [
-        loadedUsers,
-        loadedPendingUsers,
-        loadedTasks,
-        loadedPrograms,
-        loadedAssignments,
-        loadedAdminLogs,
-        loadedCurrentUser
-      ] = await Promise.all([
-        fetch("https://task-management-backend-17a5.onrender.com/api/users")
-  .then(res => res.json()),
-       fetch("https://task-management-backend-17a5.onrender.com/api/pending-users")
-  .then(res => res.json()),
-        fetch("https://task-management-backend-17a5.onrender.com/api/tasks")
-          .then(res => res.json())
-          .then(data => {
-            console.log("Fetched tasks:", data);
-            setTasks(data);
-          })
-          .catch(err => console.error("Error fetching tasks:", err)),
-        fetch("https://task-management-backend-17a5.onrender.com/api/programs").then(res => res.json()),
-        fetch("https://task-management-backend-17a5.onrender.com/api/assignments").then(res => res.json()),
-        fetch("https://task-management-backend-17a5.onrender.com/api/admin-logs").then(res => res.json()),
-        fetch("https://task-management-backend-17a5.onrender.com/api/current-user").then(res => res.json())
-       
-      ]);
-
-      // ...rest of loadData logic...
-    } catch (err) {
-      console.error("Error in loadData:", err);
-    } finally {
-      setIsLoadingAppData(false);
-    }
-  };
-
-  loadData();
-}, []);
+    const loadData = async () => {
+      setIsLoadingAppData(true);
+      try {
+        const [
+          loadedUsers,
+          loadedPendingUsers,
+          loadedTasks,
+          loadedPrograms,
+          loadedAssignments,
+          loadedAdminLogs,
+          loadedCurrentUser
+        ] = await Promise.all([
+          fetch("https://task-management-backend-17a5.onrender.com/api/users")
+            .then(res => res.ok ? res.json() : Promise.reject(new Error(`Users fetch failed: ${res.status}`)))
+            .catch(err => { console.error("Error fetching users:", err); return []; }),
+          fetch("https://task-management-backend-17a5.onrender.com/api/pending-users")
+            .then(res => res.ok ? res.json() : Promise.reject(new Error(`Pending users fetch failed: ${res.status}`)))
+            .catch(err => { console.error("Error fetching pending users:", err); return []; }),
+          fetch("https://task-management-backend-17a5.onrender.com/api/tasks")
+            .then(res => res.ok ? res.json() : Promise.reject(new Error(`Tasks fetch failed: ${res.status}`)))
+            .catch(err => { console.error("Error fetching tasks:", err); return []; }),
+          fetch("https://task-management-backend-17a5.onrender.com/api/programs")
+            .then(res => res.ok ? res.json() : Promise.reject(new Error(`Programs fetch failed: ${res.status}`)))
+            .catch(err => { console.error("Error fetching programs:", err); return []; }),
+          fetch("https://task-management-backend-17a5.onrender.com/api/assignments")
+            .then(res => res.ok ? res.json() : Promise.reject(new Error(`Assignments fetch failed: ${res.status}`)))
+            .catch(err => { console.error("Error fetching assignments:", err); return []; }),
+          fetch("https://task-management-backend-17a5.onrender.com/api/admin-logs")
+            .then(res => res.ok ? res.json() : Promise.reject(new Error(`Admin logs fetch failed: ${res.status}`)))
+            .catch(err => { console.error("Error fetching admin logs:", err); return []; }),
+          fetch("https://task-management-backend-17a5.onrender.com/api/current-user")
+            .then(res => {
+                if (!res.ok) { 
+                    if (res.status === 404 || res.status === 204) return null; // No current user or empty response
+                    return Promise.reject(new Error(`Current user fetch failed: ${res.status}`));
+                }
+                // Handle case where response might be empty for no user
+                const contentLength = res.headers.get("content-length");
+                if (contentLength === "0") return null;
+                return res.json();
+            })
+            .catch(err => { console.error("Error fetching current user:", err); return null; })
+        ]);
+  
+        setUsers(loadedUsers || []);
+        setPendingUsers(loadedPendingUsers || []);
+        setTasks(loadedTasks || []);
+        console.log("Fetched tasks from backend:", loadedTasks);
+        setPrograms(loadedPrograms || []);
+        setAssignments(loadedAssignments || []);
+        setAdminLogs(loadedAdminLogs || []);
+        setCurrentUser(loadedCurrentUser || null);
+  
+      } catch (err) {
+        console.error("Error in loadData aggregation:", err);
+        setError(`Failed to load initial application data. ${err instanceof Error ? err.message : 'Please check connectivity or try again later.'}`);
+        // Set sensible defaults to prevent app crash
+        setUsers([]);
+        setPendingUsers([]);
+        setTasks([]);
+        setPrograms([]);
+        setAssignments([]);
+        setAdminLogs([]);
+        setCurrentUser(null);
+      } finally {
+        setIsLoadingAppData(false);
+      }
+    };
+  
+    loadData();
+  }, []);
 
 
 const createTestTask = () => {
@@ -192,30 +220,31 @@ const createTestTask = () => {
     },
     body: JSON.stringify({
       title: "Test Task",
-      assignedTo: "User A",
-      status: "pending",
+      // assignedTo: "User A", // Task interface doesn't have this directly
+      // status: "pending", // Task interface doesn't have this directly
+      description: "A test task description",
+      requiredSkills: "Testing"
     }),
   })
     .then(res => res.json())
     .then(data => {
       console.log("Task created:", data);
-      setTasks(prev => [...prev, data]); // update task list
+      setTasks(prev => [...prev, data]); 
     })
     .catch(err => console.error("Error creating task:", err));
 };
 
 
-  // Wrapper for setPreRegistrationForm to persist to localStorage
   const setPreRegistrationForm = (value: React.SetStateAction<typeof initialPreRegistrationFormState>) => {
     setPreRegistrationFormInternal(value);
   };
 
 
   const clearMessages = useCallback(() => { setError(null); setSuccessMessage(null); setInfoMessage(null); }, []);
-  const navigateTo = useCallback((page: Page, params?: Record<string, string>) => { let hash = `#${page}`; if (params && Object.keys(params).length > 0) { hash += `?${new URLSearchParams(params).toString()}`; } if (window.location.hash !== hash) { window.location.hash = hash; } else { _setCurrentPageInternal(page); /* Ensure internal state updates if hash is same */ } }, []);
+  const navigateTo = useCallback((page: Page, params?: Record<string, string>) => { let hash = `#${page}`; if (params && Object.keys(params).length > 0) { hash += `?${new URLSearchParams(params).toString()}`; } if (window.location.hash !== hash) { window.location.hash = hash; } else { _setCurrentPageInternal(page); } }, []);
 
   useEffect(() => {
-    if (isLoadingAppData) return; // Don't process hash until data is loaded
+    if (isLoadingAppData) return; 
 
     const processHash = () => {
       clearMessages();
@@ -250,7 +279,6 @@ const createTestTask = () => {
         return;
       }
 
-      // Logged-in user routing logic
       const defaultPageDetermination = currentUser.role === 'admin' ? Page.Dashboard : Page.ViewAssignments;
       let newPage = (targetPageFromHashPath || defaultPageDetermination) as Page;
 
@@ -261,19 +289,17 @@ const createTestTask = () => {
       const currentTopLevelPagePath = window.location.hash.substring(1).split('?')[0].toUpperCase();
       const targetParams = paramsString ? Object.fromEntries(params) : undefined;
 
-      if (newPage !== currentTopLevelPagePath) {
+      if (newPage !== currentTopLevelPagePath || JSON.stringify(Object.fromEntries(new URLSearchParams(window.location.hash.split('?')[1] || ''))) !== JSON.stringify(targetParams || {})) {
            navigateTo(newPage, targetParams);
       }
       _setCurrentPageInternal(newPage); 
 
-      // User Tour Logic
       if (currentUser && currentUser.role === 'user' && !localStorage.getItem(`hasCompletedUserTour_${currentUser.id}`)) {
          setTimeout(() => {
-            // Check currentPage from state, not from hash processing variables, as state might not have updated yet.
             if (currentPage !== Page.Login && currentPage !== Page.PreRegistration) { 
                 setShowUserTour(true);
             }
-        }, 500); // Small delay to allow page to render
+        }, 500); 
       }
     };
 
@@ -283,7 +309,7 @@ const createTestTask = () => {
     return () => {
       window.removeEventListener('hashchange', processHash);
     };
-  }, [currentUser, navigateTo, clearMessages, users, isLoadingAppData, _setCurrentPageInternal, currentPage]); // Added currentPage to dependencies
+  }, [currentUser, navigateTo, clearMessages, users, isLoadingAppData, _setCurrentPageInternal, currentPage]);
 
 
   useEffect(() => {
@@ -304,13 +330,12 @@ const createTestTask = () => {
     }
   }, [currentPage, currentUser]);
 
-  // Helper to find an admin to notify
   const getAdminToNotify = useCallback((referringAdminId?: string): User | undefined => {
     if (referringAdminId) {
       const refAdmin = users.find(u => u.id === referringAdminId && u.role === 'admin');
       if (refAdmin) return refAdmin;
     }
-    return users.find(u => u.role === 'admin'); // Fallback to any admin
+    return users.find(u => u.role === 'admin'); 
   }, [users]);
 
 
@@ -343,14 +368,13 @@ const createTestTask = () => {
       return;
     }
     
-    // First user must be admin and is activated directly
     if (users.length === 0) {
         if (role !== 'admin') {
             setError("The first user registered must be an Administrator. Please select the 'Admin' role.");
             return;
         }
         const newAdminUser: User = {
-            id: Date.now().toString(),
+            id: Date.now().toString(), // Backend should generate ID
             email: email,
             uniqueId: email, 
             password: password,
@@ -361,15 +385,15 @@ const createTestTask = () => {
             phone: '',
             notificationPreference: 'email',
         };
+        // Assuming backend creates the user and returns it or confirms
+        // For now, optimistic update, then full array save.
         const updatedUsers = [...users, newAdminUser];
         setUsers(updatedUsers);
         await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(updatedUsers),
-});
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updatedUsers), // This sends the whole array. Backend must handle this.
+        });
 
         await emailService.sendWelcomeRegistrationEmail(newAdminUser.email, newAdminUser.displayName, newAdminUser.role);
         setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user' });
@@ -378,10 +402,9 @@ const createTestTask = () => {
         return;
     }
 
-    // Subsequent admin registrations are also direct
     if (role === 'admin') {
         const newAdminUser: User = {
-            id: Date.now().toString(),
+            id: Date.now().toString(), // Backend should generate ID
             email: email,
             uniqueId: email,
             password: password,
@@ -392,12 +415,10 @@ const createTestTask = () => {
         const updatedUsers = [...users, newAdminUser];
         setUsers(updatedUsers);
         await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(updatedUsers),
-});
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updatedUsers), // Sends the whole array
+        });
 
         await emailService.sendWelcomeRegistrationEmail(newAdminUser.email, newAdminUser.displayName, newAdminUser.role);
         setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user' });
@@ -406,10 +427,9 @@ const createTestTask = () => {
         return;
     }
 
-    // General user registrations go to pending
     if (role === 'user') {
         const newPendingUser: PendingUser = {
-            id: Date.now().toString(),
+            id: Date.now().toString(), // Backend should generate ID
             uniqueId: email, 
             displayName: name,
             email: email,
@@ -418,20 +438,15 @@ const createTestTask = () => {
             submissionDate: new Date().toISOString(),
             referringAdminId: "GENERAL_REGISTRATION" 
         };
-        useEffect(() => {
-        fetch("https://task-management-backend-17a5.onrender.com/")
-            .then(res => res.json())
-            .then(data => console.log("Backend tasks:", data))
-            .catch(err => console.error("Error fetching from backend:", err));
-        }, []);
+        // Removed misplaced useEffect from here
 
         const updatedPendingUsers = [...pendingUsers, newPendingUser];
         setPendingUsers(updatedPendingUsers);
         await fetch("https://task-management-backend-17a5.onrender.com/api/pending-users", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify(updatedPendingUsers),
-})
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(updatedPendingUsers), // Sends the whole array
+        });
         
         await emailService.sendRegistrationPendingToUserEmail(newPendingUser.email, newPendingUser.displayName);
         
@@ -458,45 +473,36 @@ const createTestTask = () => {
     }
 
     try {
-  const response = await fetch("https://task-management-backend-17a5.onrender.com/api/users/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: emailToLogin, password: passwordToLogin }),
-  });
+      const response = await fetch("https://task-management-backend-17a5.onrender.com/api/users/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: emailToLogin, password: passwordToLogin }),
+      });
 
-  const data = await response.json();
-  if (!response.ok) {
-    setError(data.error || "Login failed.");
-    return;
-  }
+      const data = await response.json();
+      if (!response.ok) {
+        setError(data.error || "Login failed. Please check your credentials or if the account is approved.");
+        return;
+      }
 
-  setCurrentUser(data.user);
-  setNewLoginForm({ email: '', password: '' });
-  setSuccessMessage(`Login successful! Welcome back, ${data.user.displayName}`);
-} catch (err) {
-  console.error("Login error:", err);
-  setError("Server error. Please try again later.");
-}
- 
-    if (user) { 
-      if (user.password === passwordToLogin) { 
-        setCurrentUser(user); 
-        await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(user),
-});
+      if (data.user) {
+        setCurrentUser(data.user);
+        // Persist current user to backend session/record if needed
+        await fetch("https://task-management-backend-17a5.onrender.com/api/current-user", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data.user),
+        });
         setNewLoginForm({ email: '', password: '' }); 
-        setSuccessMessage(`Login successful! Welcome back, ${user.displayName}.`); 
-        // Navigation and tour logic handled by useEffect based on currentUser update
-      } else { 
-        setError("Invalid password."); 
-      } 
-    } else { 
-      setError("Email address not found or account not yet approved/created."); 
-    } 
+        setSuccessMessage(`Login successful! Welcome back, ${data.user.displayName}.`);
+        // Navigation handled by useEffect watching currentUser
+      } else {
+        setError("Login failed: No user data received from server.");
+      }
+    } catch (err) {
+      console.error("Login error:", err);
+      setError("Server error during login. Please try again later.");
+    }
   };
 
   const handleForgotPassword = async () => { 
@@ -505,12 +511,13 @@ const createTestTask = () => {
       setError("Please enter your Email Address first to check for password recovery options."); 
       return; 
     } 
+    // This assumes users array is populated and client-side check is okay for this demo
     const userToCheck = users.find(u => u.email === newLoginForm.email); 
     if (userToCheck) { 
       await emailService.sendPasswordResetRequestEmail(userToCheck.email, userToCheck.displayName);
       setInfoMessage(`Password Recovery for '${userToCheck.displayName}': A simulated password reset link has been "sent" to ${userToCheck.email}. (Check console for email simulation)`); 
     } else { 
-      setError("Email Address not found in the system."); 
+      setError("Email Address not found in the local user list. Ensure the backend handles password reset requests directly if users are not pre-loaded."); 
     } 
   };
   
@@ -546,7 +553,7 @@ const createTestTask = () => {
     }
 
     const newPendingUser: PendingUser = {
-        id: Date.now().toString(),
+        id: Date.now().toString(), // Backend should generate ID
         uniqueId: preRegistrationForm.uniqueId,
         displayName: preRegistrationForm.displayName,
         email: preRegistrationForm.email,
@@ -558,10 +565,11 @@ const createTestTask = () => {
     const updatedPendingUsers = [...pendingUsers, newPendingUser];
     setPendingUsers(updatedPendingUsers);
     await fetch("https://task-management-backend-17a5.onrender.com/api/pending-users", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify(updatedPendingUsers),
-})
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updatedPendingUsers), // Sends whole array
+    });
+
     await emailService.sendPreRegistrationSubmittedToUserEmail(
         newPendingUser.email!, 
         newPendingUser.displayName,
@@ -585,14 +593,19 @@ const createTestTask = () => {
 
   const handleLogout = async () => { 
       clearMessages(); 
+      const oldUser = currentUser;
       setCurrentUser(null); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(null),
-});
+      
+      if (oldUser) { // Only attempt backend logout if there was a user
+        try {
+            await fetch("https://task-management-backend-17a5.onrender.com/api/current-user", {
+                method: "DELETE", // Or POST to a /logout endpoint if backend designed that way
+            });
+        } catch (err) {
+            console.error("Error during backend logout:", err);
+            // Frontend logout still proceeds
+        }
+      }
 
       setNewLoginForm({ email: '', password: '' }); 
       setAuthView('login'); 
@@ -631,26 +644,24 @@ const createTestTask = () => {
       userInterests: userForm.userInterests, 
       phone: userForm.phone, 
       notificationPreference: userForm.notificationPreference, 
-      password: newPassword, 
+      password: newPassword, // Sending password, backend should hash if changed
     }; 
     const updatedUsers = users.map(u => (u.id === currentUser.id ? updatedUser : u));
     setUsers(updatedUsers); 
+    // This sends the entire users array. If backend updates single user, adjust this.
     await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(updatedUsers),
-});
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updatedUsers),
+    });
 
     setCurrentUser(updatedUser); 
-    await fetch("https://task-management-backend-17a5.onrender.com/api/users/current", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(updatedUser),
-});
+    // Also update the "current-user" specific record on backend
+    await fetch("https://task-management-backend-17a5.onrender.com/api/current-user", {
+      method: "POST", // Or PUT
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updatedUser),
+    });
 
     setUserForm(prev => ({ ...prev, password: '', confirmPassword: '' })); 
     setSuccessMessage("Profile updated successfully."); 
@@ -722,24 +733,22 @@ const createTestTask = () => {
         phone: userForm.phone, 
         notificationPreference: userForm.notificationPreference, 
         role: userForm.role, 
-        password: finalPassword, 
+        password: finalPassword, // Backend should hash if changed
       }; 
       const newUsersList = users.map(u => u.id === editingUserId ? updatedUserRec : u);
       setUsers(newUsersList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(newUsersList),
-});
+      await fetch("https://task-management-backend-17a5.onrender.com/api/users", { // Sends whole array
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newUsersList),
+      });
       setSuccessMessage(`User '${updatedUserRec.displayName}' updated successfully.`); 
     } else { 
       const newUserRec: User = { 
-          id: approvingPendingUser ? approvingPendingUser.id : Date.now().toString(), 
+          id: approvingPendingUser ? approvingPendingUser.id : Date.now().toString(), // ID might be from pending user or new
           email: userForm.email, 
           uniqueId: userForm.uniqueId, 
-          password: finalPassword, 
+          password: finalPassword, // Backend should hash
           displayName: userForm.displayName, 
           position: userForm.position, 
           userInterests: userForm.userInterests, 
@@ -750,30 +759,25 @@ const createTestTask = () => {
       }; 
       const newUsersList = [...users, newUserRec];
       setUsers(newUsersList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(newUsersList),
-});
+      await fetch("https://task-management-backend-17a5.onrender.com/api/users", { // Sends whole array
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newUsersList),
+      });
 
       if (approvingPendingUser) { 
         const newPendingUsersList = pendingUsers.filter(pu => pu.id !== approvingPendingUser.id);
         setPendingUsers(newPendingUsersList); 
-        await fetch("https://task-management-backend-17a5.onrender.com/api/pending-users", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(newPendingUsersList),
-});
-
+        await fetch("https://task-management-backend-17a5.onrender.com/api/pending-users", { // Sends whole array
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(newPendingUsersList),
+        });
         await emailService.sendAccountActivatedByAdminEmail(newUserRec.email, newUserRec.displayName, adminActor.displayName);
         setSuccessMessage(`User '${newUserRec.displayName}' approved from pending list. Account activated. (Email simulation in console)`); 
       } else { 
         await emailService.sendWelcomeRegistrationEmail(newUserRec.email, newUserRec.displayName, newUserRec.role); 
-        await emailService.sendAccountActivatedByAdminEmail(newUserRec.email, newUserRec.displayName, adminActor.displayName);
+        // await emailService.sendAccountActivatedByAdminEmail(newUserRec.email, newUserRec.displayName, adminActor.displayName); // Welcome implies activated
         setSuccessMessage(`User '${newUserRec.displayName}' added directly by admin. Account activated. (Email simulation in console)`); 
       } 
     } 
@@ -812,57 +816,51 @@ const createTestTask = () => {
   const handleRejectPendingUser = async (pendingUserId: string) => { 
       const newPendingUsersList = pendingUsers.filter(pu => pu.id !== pendingUserId);
       setPendingUsers(newPendingUsersList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/pending-users", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(newPendingUsersList),
-});
-
+      await fetch("https://task-management-backend-17a5.onrender.com/api/pending-users", { // Sends whole array
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newPendingUsersList),
+      });
       setSuccessMessage("Pending user request rejected."); 
       if (approvingPendingUser?.id === pendingUserId) { setApprovingPendingUser(null); setUserForm(initialUserFormData); } 
   };
+
   const handleDeleteUser = async (userId: string) => { 
       if (currentUser?.role !== 'admin') { setError("Only admins can delete users."); return; } 
       if (userId === currentUser?.id) { setError("You cannot delete your own account."); return; } 
       const newUsersList = users.filter(u => u.id !== userId);
       setUsers(newUsersList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(newUsersList),
-});
+      await fetch("https://task-management-backend-17a5.onrender.com/api/users", { // Sends whole array
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newUsersList),
+      });
       const newAssignmentsList = assignments.filter(a => a.personId !== userId);
       setAssignments(newAssignmentsList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(newAssignmentsList),
-});
+      await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", { // Sends whole array
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newAssignmentsList),
+      });
       setSuccessMessage("User deleted successfully."); 
       if(editingUserId === userId) { setEditingUserId(null); setUserForm(initialUserFormData); } 
   };
+
   const handleAddProgram = async (e: React.FormEvent) => { 
       e.preventDefault(); clearMessages(); 
       if (!programForm.name.trim()) { setError("Program name cannot be empty."); return; } 
-      const newProgramRec: Program = { ...programForm, id: Date.now().toString() }; 
+      const newProgramRec: Program = { ...programForm, id: Date.now().toString() };  // Backend should generate ID
       const newProgramsList = [...programs, newProgramRec];
       setPrograms(newProgramsList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/programs", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(newProgramsList),
-});
+      await fetch("https://task-management-backend-17a5.onrender.com/api/programs", { // Sends whole array
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newProgramsList),
+      });
       setProgramForm({ name: '', description: '' }); 
       setSuccessMessage(`Program "${newProgramRec.name}" added successfully.`); 
   };
+
   const handleDeleteProgram = async (id: string) => { 
       clearMessages(); 
       const isProgramInUse = tasks.some(task => task.programId === id); 
@@ -871,62 +869,54 @@ const createTestTask = () => {
           if (!window.confirm("This program is linked to tasks. Deleting it will unlink these tasks. Are you sure?")) { return; } 
           newTasksList = tasks.map(task => task.programId === id ? {...task, programId: undefined, programName: undefined } : task);
           setTasks(newTasksList);
-          await fetch("https://task-management-backend-17a5.onrender.com/api/tasks", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(newTasksList),
-});
+          await fetch("https://task-management-backend-17a5.onrender.com/api/tasks", { // Sends whole array
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(newTasksList),
+          });
       } 
       const newProgramsList = programs.filter(p => p.id !== id);
       setPrograms(newProgramsList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/programs", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(newProgramsList),
-});
+      await fetch("https://task-management-backend-17a5.onrender.com/api/programs", { // Sends whole array
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newProgramsList),
+      });
       setSuccessMessage("Program deleted successfully."); 
   };
+
   const handleAddTask = async (e: React.FormEvent) => { 
       e.preventDefault(); clearMessages(); 
       if (!taskForm.title.trim()) { setError("Task title cannot be empty."); return; } 
       const program = programs.find(p => p.id === taskForm.programId); 
-      const newTaskRec: Task = { id: Date.now().toString(), title: taskForm.title, description: taskForm.description, requiredSkills: taskForm.requiredSkills, programId: taskForm.programId || undefined, programName: program ? program.name : undefined, deadline: taskForm.deadline || undefined }; 
+      const newTaskRec: Task = { id: Date.now().toString(), title: taskForm.title, description: taskForm.description, requiredSkills: taskForm.requiredSkills, programId: taskForm.programId || undefined, programName: program ? program.name : undefined, deadline: taskForm.deadline || undefined }; // Backend should generate ID
       const newTasksList = [...tasks, newTaskRec];
       setTasks(newTasksList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/tasks", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(newTasksList),
-});
+      await fetch("https://task-management-backend-17a5.onrender.com/api/tasks", { // Sends whole array
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newTasksList),
+      });
       setTaskForm({ title: '', description: '', requiredSkills: '', programId: '', deadline: '' }); 
       setSuccessMessage(`Task "${newTaskRec.title}" added successfully.`); 
   };
+
   const handleDeleteTask = async (id: string) => { 
       clearMessages(); 
       const newTasksList = tasks.filter(t => t.id !== id);
       setTasks(newTasksList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/tasks", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(newTasksList),
-});
+      await fetch("https://task-management-backend-17a5.onrender.com/api/tasks", { // Sends whole array
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newTasksList),
+      });
       const newAssignmentsList = assignments.filter(a => a.taskId !== id);
       setAssignments(newAssignmentsList);  
-      await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(newAssignmentsList),
-});
+      await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", { // Sends whole array
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newAssignmentsList),
+      });
       setSuccessMessage("Task deleted successfully."); 
   };
 
@@ -942,16 +932,14 @@ const createTestTask = () => {
     if (personStillHasActiveTask) { setError(`${person.displayName} already has an active task. Cannot assign another until their current task is completed or declined.`); return; } 
     if (assignments.find(a => a.taskId === task.id && (a.status !== 'declined_by_user' && a.status !== 'completed_admin_approved'))) { if (!window.confirm(`Task "${task.title}" is already assigned or pending. Reassign to ${person.displayName} (pending their acceptance)? This will clear previous active assignment for this task.`)) { return; } } 
     const assignmentDeadline = assignmentForm.specificDeadline || task.deadline; 
-    const newAssignmentRec: Assignment = { taskId: task.id, personId: person.id, taskTitle: task.title, personName: person.displayName, justification: assignmentSuggestion.justification, status: 'pending_acceptance', deadline: assignmentDeadline }; 
+    const newAssignmentRec: Assignment = { taskId: task.id, personId: person.id, taskTitle: task.title, personName: person.displayName, justification: assignmentSuggestion.justification, status: 'pending_acceptance', deadline: assignmentDeadline }; // Backend should generate ID/handle assignment creation
     const newAssignmentsList = [...assignments.filter(a => a.taskId !== task.id || (a.status === 'declined_by_user' || a.status === 'completed_admin_approved')), newAssignmentRec];
     setAssignments(newAssignmentsList); 
-    await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(newAssignmentsList),
-});
+    await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", { // Sends whole array
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(newAssignmentsList),
+    });
     
     await emailService.sendTaskProposalEmail(person.email, person.displayName, task.title, currentUser.displayName, assignmentDeadline);
 
@@ -981,14 +969,11 @@ const createTestTask = () => {
       adminNotificationMessage = 'declined';
     } 
     setAssignments(updatedAssignmentsList);
-    await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(updatedAssignmentsList),
-});
-
+    await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", { // Sends whole array
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updatedAssignmentsList),
+    });
 
     if (adminToNotify && currentUser) {
         await emailService.sendTaskStatusUpdateToAdminEmail(adminToNotify.email, adminToNotify.displayName, currentUser.displayName, assignment.taskTitle, adminNotificationMessage);
@@ -1004,14 +989,11 @@ const createTestTask = () => {
     const newStatus: AssignmentStatus = isLate ? 'submitted_late' : 'submitted_on_time'; 
     const updatedAssignmentsList = assignments.map(a => a.taskId === assignment.taskId && a.personId === currentUser.id ? { ...a, status: newStatus, userSubmissionDate: submissionDate.toISOString(), userDelayReason: isLate ? delayReason : undefined, } : a ); 
     setAssignments(updatedAssignmentsList); 
-    await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(updatedAssignmentsList),
-});
-
+    await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", { // Sends whole array
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updatedAssignmentsList),
+    });
     
     const adminToNotify = getAdminToNotify(currentUser.referringAdminId);
     if (adminToNotify) {
@@ -1028,14 +1010,11 @@ const createTestTask = () => {
     if (!currentUser || currentUser.role !== 'admin') { setError("Only admins can approve task completion."); return; } 
     const updatedAssignmentsList = assignments.map(a => a.taskId === assignment.taskId && a.personId === assignment.personId ? { ...a, status: 'completed_admin_approved' as AssignmentStatus } : a ); 
     setAssignments(updatedAssignmentsList); 
-    await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(updatedAssignmentsList),
-});
-
+    await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", { // Sends whole array
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updatedAssignmentsList),
+    });
     
     const userToNotify = users.find(u => u.id === assignment.personId); 
     if (userToNotify) {
@@ -1048,13 +1027,11 @@ const createTestTask = () => {
       if (!currentUser || currentUser.role !== 'admin') { setError("Action not permitted."); return; } 
       const newAssignmentsList = assignments.filter(a => !(a.taskId === assignmentToClear.taskId && a.personId === assignmentToClear.personId));
       setAssignments(newAssignmentsList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(newAssignmentsList),
-});
+      await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", { // Sends whole array
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newAssignmentsList),
+      });
       setSuccessMessage(`Assignment "${assignmentToClear.taskTitle}" for ${assignmentToClear.personName} has been cleared/unassigned.`); 
   };
   const handleAddAdminLogEntry = async (e: React.FormEvent) => { 
@@ -1077,16 +1054,14 @@ const createTestTask = () => {
               setIsSubmittingLog(false); return; 
           } 
       } 
-      const newLogEntryRec: AdminLogEntry = { id: Date.now().toString(), adminId: currentUser.id, adminDisplayName: currentUser.displayName, timestamp: new Date().toISOString(), logText: adminLogText.trim(), ...(imagePreviewUrl && { imagePreviewUrl }), }; 
+      const newLogEntryRec: AdminLogEntry = { id: Date.now().toString(), adminId: currentUser.id, adminDisplayName: currentUser.displayName, timestamp: new Date().toISOString(), logText: adminLogText.trim(), ...(imagePreviewUrl && { imagePreviewUrl }), }; // Backend should generate ID
       const newAdminLogsList = [newLogEntryRec, ...adminLogs];
       setAdminLogs(newAdminLogsList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/adminLogs", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(newAdminLogsList),
-});
+      await fetch("https://task-management-backend-17a5.onrender.com/api/adminLogs", { // Sends whole array
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newAdminLogsList),
+      });
 
       setAdminLogText(''); setAdminLogImageFile(null); 
       const fileInput = document.getElementById('admin-log-image-file') as HTMLInputElement; 
@@ -1098,20 +1073,16 @@ const createTestTask = () => {
       if (!currentUser || currentUser.role !== 'admin') return; 
       const newAdminLogsList = adminLogs.filter(log => log.id !== logId);
       setAdminLogs(newAdminLogsList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/adminLogs", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(newAdminLogsList),
-});
-
+      await fetch("https://task-management-backend-17a5.onrender.com/api/adminLogs", { // Sends whole array
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newAdminLogsList),
+      });
       setSuccessMessage("Log entry deleted."); 
   };
 
   const handleUserTourClose = (completed: boolean) => {
     if (currentUser && currentUser.role === 'user') {
-        // This localStorage item is specific to the tour and not part of cloudDataService
         localStorage.setItem(`hasCompletedUserTour_${currentUser.id}`, 'true');
     }
     setShowUserTour(false);
@@ -1260,21 +1231,32 @@ const createTestTask = () => {
   );
   
   const renderPage = () => {
-    if (!currentUser) { 
-      console.error("Error: renderPage called without currentUser, but auth/pre-reg flow should handle this.");
-      // This path should ideally not be hit if routing logic is correct and data is loaded.
-      // If hit, it might be during initial load or a state inconsistency.
-      // Navigating to login or showing spinner is a safe fallback.
-       if (window.location.hash !== `#${Page.Login}` && window.location.hash !== `#${Page.PreRegistration}`) {
-         navigateTo(Page.Login);
-       }
-      return <LoadingSpinner />; 
+    if (!currentUser && (currentPage !== Page.Login && currentPage !== Page.PreRegistration) ) { 
+      // This case might be hit if routing hasn't caught up to a null currentUser state yet.
+      // The useEffect for routing should handle redirecting to Login.
+      // Displaying a spinner or minimal message until redirect occurs.
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center bg-bground">
+          <LoadingSpinner />
+          <p className="text-primary mt-2">Redirecting to login...</p>
+        </div>
+      );
+    }
+    if (!currentUser && currentPage === Page.Login) {
+        // This is expected, handled by the main conditional rendering block below
+    } else if (!currentUser && currentPage === Page.PreRegistration) {
+        // This is expected, handled by the main conditional rendering block below
+    } else if (!currentUser) {
+        // Fallback if somehow no currentUser but not on login/prereg page after checks
+        navigateTo(Page.Login);
+        return <LoadingSpinner />;
     }
     
     
     switch (currentPage) {
-      case Page.Dashboard: const isAdminDashboard = currentUser.role === 'admin'; return ( <div> <div className="text-center"> <h2 className="text-3xl font-semibold mb-4 text-primary">Welcome, {currentUser.displayName}!</h2> <p className="text-lg text-neutral">Select an option from the navigation to get started.</p> <p className="mt-2 text-md text-neutral">Your role: <span className="font-semibold capitalize">{currentUser.role}</span>. Position: <span className="font-semibold">{currentUser.position}</span></p> <p className="text-sm text-neutral">Logged in as: {currentUser.email} (System ID: {currentUser.uniqueId})</p> </div> {isAdminDashboard && ( <div className="mt-8 pt-6 border-t border-gray-300"> <h3 className="text-xl font-semibold mb-4 text-secondary flex items-center"> <ClipboardListIcon className="w-6 h-6 mr-2" /> Admin Activity Log </h3> <form onSubmit={handleAddAdminLogEntry} className="bg-surface shadow-md rounded-lg p-4 mb-6 space-y-3"> <FormTextarea id="admin-log-text" label="New Log Entry / Announcement" value={adminLogText} onChange={(e) => setAdminLogText(e.target.value)} placeholder="Enter log details, an announcement, or a note..." aria-label="New log entry text" /> <div> <label htmlFor="admin-log-image-file" className="block text-sm font-medium text-textlight">Attach Photo (Optional)</label> <input id="admin-log-image-file" type="file" accept="image/*" onChange={(e) => setAdminLogImageFile(e.target.files ? e.target.files[0] : null)} className="mt-1 block w-full text-sm text-neutral file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-white hover:file:bg-blue-600" aria-label="Attach photo to log entry" /> </div> {adminLogImageFile && ( <div className="mt-2 text-xs text-neutral">Selected file: {adminLogImageFile.name}</div> )} <button type="submit" className="btn-secondary" disabled={isSubmittingLog || (!adminLogText.trim() && !adminLogImageFile)}> {isSubmittingLog ? 'Adding Log...' : 'Add Log Entry'} </button> </form> {adminLogs.length === 0 ? ( <p className="text-neutral">No activity logs yet.</p> ) : ( <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2 bg-gray-50 p-4 rounded-lg shadow-inner"> {adminLogs.map(log => ( <div key={log.id} className="bg-surface shadow rounded-lg p-4 relative"> <button onClick={() => handleDeleteAdminLogEntry(log.id)} className="absolute top-2 right-2 text-danger hover:text-red-700 p-1 transition-colors" aria-label={`Delete log entry made on ${new Date(log.timestamp).toLocaleString()}`} > <TrashIcon className="w-4 h-4" /> </button> <p className="text-xs text-neutral mb-1"> Posted by: <strong className="text-textlight">{log.adminDisplayName}</strong> </p> <p className="text-xs text-neutral"> {new Date(log.timestamp).toLocaleString()} </p> {log.logText && <p className="text-textlight mt-2 whitespace-pre-wrap">{log.logText}</p>} {log.imagePreviewUrl && ( <div className="mt-3"> <img src={log.imagePreviewUrl} alt={`Log attachment by ${log.adminDisplayName} on ${new Date(log.timestamp).toLocaleDateString()}`} className="max-w-full h-auto rounded-md border border-gray-200" style={{ maxHeight: '300px' }} /> </div> )} </div> ))} </div> )} </div> )} </div> );
+      case Page.Dashboard: const isAdminDashboard = currentUser?.role === 'admin'; return ( <div> <div className="text-center"> <h2 className="text-3xl font-semibold mb-4 text-primary">Welcome, {currentUser?.displayName}!</h2> <p className="text-lg text-neutral">Select an option from the navigation to get started.</p> <p className="mt-2 text-md text-neutral">Your role: <span className="font-semibold capitalize">{currentUser?.role}</span>. Position: <span className="font-semibold">{currentUser?.position}</span></p> <p className="text-sm text-neutral">Logged in as: {currentUser?.email} (System ID: {currentUser?.uniqueId})</p> </div> {isAdminDashboard && ( <div className="mt-8 pt-6 border-t border-gray-300"> <h3 className="text-xl font-semibold mb-4 text-secondary flex items-center"> <ClipboardListIcon className="w-6 h-6 mr-2" /> Admin Activity Log </h3> <form onSubmit={handleAddAdminLogEntry} className="bg-surface shadow-md rounded-lg p-4 mb-6 space-y-3"> <FormTextarea id="admin-log-text" label="New Log Entry / Announcement" value={adminLogText} onChange={(e) => setAdminLogText(e.target.value)} placeholder="Enter log details, an announcement, or a note..." aria-label="New log entry text" /> <div> <label htmlFor="admin-log-image-file" className="block text-sm font-medium text-textlight">Attach Photo (Optional)</label> <input id="admin-log-image-file" type="file" accept="image/*" onChange={(e) => setAdminLogImageFile(e.target.files ? e.target.files[0] : null)} className="mt-1 block w-full text-sm text-neutral file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-white hover:file:bg-blue-600" aria-label="Attach photo to log entry" /> </div> {adminLogImageFile && ( <div className="mt-2 text-xs text-neutral">Selected file: {adminLogImageFile.name}</div> )} <button type="submit" className="btn-secondary" disabled={isSubmittingLog || (!adminLogText.trim() && !adminLogImageFile)}> {isSubmittingLog ? 'Adding Log...' : 'Add Log Entry'} </button> </form> {adminLogs.length === 0 ? ( <p className="text-neutral">No activity logs yet.</p> ) : ( <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2 bg-gray-50 p-4 rounded-lg shadow-inner"> {adminLogs.map(log => ( <div key={log.id} className="bg-surface shadow rounded-lg p-4 relative"> <button onClick={() => handleDeleteAdminLogEntry(log.id)} className="absolute top-2 right-2 text-danger hover:text-red-700 p-1 transition-colors" aria-label={`Delete log entry made on ${new Date(log.timestamp).toLocaleString()}`} > <TrashIcon className="w-4 h-4" /> </button> <p className="text-xs text-neutral mb-1"> Posted by: <strong className="text-textlight">{log.adminDisplayName}</strong> </p> <p className="text-xs text-neutral"> {new Date(log.timestamp).toLocaleString()} </p> {log.logText && <p className="text-textlight mt-2 whitespace-pre-wrap">{log.logText}</p>} {log.imagePreviewUrl && ( <div className="mt-3"> <img src={log.imagePreviewUrl} alt={`Log attachment by ${log.adminDisplayName} on ${new Date(log.timestamp).toLocaleDateString()}`} className="max-w-full h-auto rounded-md border border-gray-200" style={{ maxHeight: '300px' }} /> </div> )} </div> ))} </div> )} </div> )} </div> );
       case Page.UserProfile: 
+        if (!currentUser) return <p>Loading profile...</p>;
         const referringAdmin = users.find(u => u.id === currentUser.referringAdminId); 
         return ( 
           <div> 
@@ -1295,12 +1277,12 @@ const createTestTask = () => {
             </form> 
           </div> 
         );
-      case Page.UserManagement: if (currentUser.role !== 'admin') return <p>Access Denied.</p>; const adminManagedPendingUsers = pendingUsers.filter(pu => pu.referringAdminId === currentUser.id || users.find(u => u.id === pu.referringAdminId)?.role === 'admin' || pu.referringAdminId === "GENERAL_REGISTRATION"); const adminManagedActiveUsers = users.filter(u => u.referringAdminId === currentUser.id || u.role === 'admin' || users.find(adm => adm.id === u.referringAdminId && adm.role ==='admin')); const generateLinkForAdmin = () => { if (!currentUser || currentUser.role !== 'admin') return; const link = `${window.location.origin}${window.location.pathname}#${Page.PreRegistration}?refAdminId=${currentUser.id}`; setGeneratedLink(link); setSuccessMessage("Pre-registration link generated. Copy it below."); }; const copyLinkToClipboard = () => { if (!generatedLink) return; navigator.clipboard.writeText(generatedLink) .then(() => setSuccessMessage("Link copied to clipboard!")) .catch(err => setError("Failed to copy link: " + err)); }; return ( <div className="space-y-8"> <div> <h2 className="text-2xl font-semibold mb-4 text-primary flex items-center"> <PlusCircleIcon className="w-7 h-7 mr-2" /> {editingUserId ? 'Edit Existing User' : approvingPendingUser ? `Approve Pending User: ${approvingPendingUser.displayName}` : 'Directly Add New User (Managed by You)'} </h2> <form onSubmit={handleSaveOrApproveUserByAdmin} className="bg-surface shadow-lg rounded-lg p-6 space-y-4"> <FormInput id="manage-email" label="Email Address (Login)" type="email" value={userForm.email} onChange={e => setUserForm(prev => ({...prev, email: e.target.value}))} required /> <FormInput id="manage-uniqueId" label="System ID / Username" type="text" value={userForm.uniqueId} onChange={e => setUserForm(prev => ({...prev, uniqueId: e.target.value}))} required readOnly={!!approvingPendingUser && !editingUserId && !!approvingPendingUser.uniqueId} /> <FormInput id="manage-displayName" label="Display Name" type="text" value={userForm.displayName} onChange={e => setUserForm(prev => ({...prev, displayName: e.target.value}))} required readOnly={!!approvingPendingUser && !editingUserId && !!approvingPendingUser.displayName} /> <FormInput id="manage-position" label="Position" type="text" value={userForm.position} onChange={e => setUserForm(prev => ({...prev, position: e.target.value}))} placeholder="e.g., Software Engineer" required /> <FormSelect id="manage-role" label="Role" value={userForm.role} onChange={e => setUserForm(prev => ({...prev, role: e.target.value as Role}))}><option value="user">User</option><option value="admin">Admin</option></FormSelect> <FormTextarea id="manage-userInterests" label="User Interests " value={userForm.userInterests} onChange={e => setUserForm(prev => ({...prev, userInterests: e.target.value}))} placeholder="e.g., Web Development, Event Organization"/> <FormInput id="manage-phone" label="Phone (Contact, Optional)" type="tel" value={userForm.phone} onChange={e => setUserForm(prev => ({...prev, phone: e.target.value}))} placeholder="e.g., +1234567890" /> <FormSelect id="manage-notificationPreference" label="Notification Preference" value={userForm.notificationPreference} onChange={e => setUserForm(prev => ({...prev, notificationPreference: e.target.value as NotificationPreference}))}> <option value="none">None</option> <option value="email">Email</option> <option value="phone">Phone</option> </FormSelect>  <FormInput id="manage-password" label={(editingUserId && !approvingPendingUser) ? "New System Password (Optional)" : "System Password"} type="password" value={userForm.password} onChange={e => setUserForm(prev => ({...prev, password: e.target.value}))} placeholder={(editingUserId && !approvingPendingUser) ? "Leave blank to keep current" : (approvingPendingUser && approvingPendingUser.password) ? "Password set by user (can override)" : "Set a password for the user"} required={!(editingUserId && !approvingPendingUser) && !(approvingPendingUser && approvingPendingUser.password)} description={passwordRequirementsText} /> <FormInput id="manage-confirmPassword" label="Confirm System Password" type="password" value={userForm.confirmPassword} onChange={e => setUserForm(prev => ({...prev, confirmPassword: e.target.value}))} placeholder="Confirm password" required={userForm.password !== '' || (!(editingUserId && !approvingPendingUser) && !(approvingPendingUser && approvingPendingUser.password))} /> <div className="flex space-x-2"> <button type="submit" className="flex-grow btn-primary">{editingUserId ? 'Save Changes' : approvingPendingUser ? 'Approve User & Set Up Account' : 'Add User'}</button> {(editingUserId || approvingPendingUser) && <button type="button" onClick={() => { setEditingUserId(null); setApprovingPendingUser(null); setUserForm(initialUserFormData); clearMessages();}} className="btn-neutral">Cancel</button>}</div> </form> </div> <div className="bg-surface shadow-lg rounded-lg p-6 space-y-4"> <h2 className="text-xl font-semibold text-info flex items-center"><KeyIcon className="w-6 h-6 mr-2"/> Generate Pre-registration Link (for Regular Users)</h2> <p className="text-sm text-neutral">Share this link with regular users to allow them to pre-register under your administration. They will submit their desired System ID and Display Name.</p> <button onClick={generateLinkForAdmin} className="btn-info">Generate My Link</button> {generatedLink && ( <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded"> <p className="text-sm text-blue-700 break-all mb-2">{generatedLink}</p> <button onClick={copyLinkToClipboard} className="btn-secondary text-xs px-2 py-1">Copy to Clipboard</button> </div> )} </div> {pendingUsers.length > 0 && ( <div className="mt-8"> <h2 className="text-xl font-semibold mb-3 text-amber-600 flex items-center">Pending User Approvals ({pendingUsers.length})</h2> <div className="space-y-3 max-h-[40vh] overflow-y-auto pr-2 bg-gray-50 p-4 rounded-lg shadow"> {pendingUsers.map(pu => ( <div key={pu.id} className="bg-white border border-gray-200 rounded-lg p-3"> <div className="flex justify-between items-start"> <div> <h3 className="text-md font-semibold text-amber-700">{pu.displayName}</h3> <p className="text-xs text-gray-600">System ID: {pu.uniqueId}</p> <p className="text-xs text-gray-600">Email: {pu.email || "Not set"}</p> <p className="text-xs text-gray-600">Intended Role: {pu.role}</p> <p className="text-xs text-gray-500 mt-0.5">Submitted: {new Date(pu.submissionDate).toLocaleDateString()}</p> <p className="text-xs text-gray-500 mt-0.5">Ref. Admin ID: {pu.referringAdminId === "GENERAL_REGISTRATION" ? "General Registration" : pu.referringAdminId ? pu.referringAdminId.substring(0,8) + "..." : "N/A"}</p></div> <div className="flex space-x-2"> <button onClick={() => handleInitiateApprovePendingUser(pu)} className="btn-success text-xs px-2 py-1">Review & Approve</button> <button onClick={() => handleRejectPendingUser(pu.id)} className="btn-danger text-xs px-2 py-1">Reject</button> </div> </div> </div> ))} </div> </div> )} <div className="mt-8"> <h2 className="text-xl font-semibold mb-3 text-primary flex items-center"><UsersIcon className="w-6 h-6 mr-2" /> Active Users ({users.length})</h2> {users.length === 0 ? <p className="text-neutral">No active users found.</p> : ( <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-2 bg-gray-50 p-4 rounded-lg shadow"> {users.map(u => ( <div key={u.id} className="bg-white border border-gray-200 rounded-lg p-3"> <div className="flex justify-between items-start"> <div> <h3 className="text-md font-semibold text-texthighlight">{u.displayName} <span className="text-xs px-1.5 py-0.5 bg-accent text-white rounded-full align-middle">{u.role}</span></h3> <p className="text-xs text-gray-600">Email: {u.email}</p> <p className="text-xs text-gray-600">System ID: {u.uniqueId}</p> <p className="text-xs text-gray-500 mt-0.5">Position: {u.position || 'N/A'}</p> <p className="text-xs text-gray-500 mt-0.5 truncate" title={u.userInterests}>Interests: {u.userInterests || 'N/A'}</p> <p className="text-xs text-gray-500 mt-0.5">Phone: {u.phone || 'N/A'}</p> <p className="text-xs text-gray-500 mt-0.5">Notify via: {u.notificationPreference || 'none'}</p> </div> <div className="flex space-x-1"> <button onClick={() => handleEditUserByAdmin(u)} className="text-blue-500 hover:text-blue-700 p-1" aria-label={`Edit user ${u.displayName}`}><UserCircleIcon className="w-4 h-4"/> </button> {currentUser.id !== u.id && (<button onClick={() => handleDeleteUser(u.id)} className="text-red-500 hover:text-red-700 p-1" aria-label={`Delete user ${u.displayName}`}><TrashIcon className="w-4 h-4" /></button> )} </div> </div> </div> ))} </div> )} </div> </div> );
-      case Page.ManagePrograms: if (currentUser.role !== 'admin') return <p>Access Denied.</p>; return ( <div className="grid md:grid-cols-2 gap-8"> <div> <h2 className="text-2xl font-semibold mb-4 text-info flex items-center"><PlusCircleIcon className="w-7 h-7 mr-2" /> Add New Program</h2> <form onSubmit={handleAddProgram} className="bg-surface shadow-lg rounded-lg p-6 space-y-4"> <FormInput id="programName" label="Program Name" type="text" value={programForm.name} onChange={e => setProgramForm(prev => ({ ...prev, name: e.target.value }))} required /> <FormTextarea id="programDescription" label="Description" value={programForm.description} onChange={e => setProgramForm(prev => ({ ...prev, description: e.target.value }))} /> <button type="submit" className="btn-primary">Add Program</button> </form> </div> <div> <h2 className="text-2xl font-semibold mb-4 text-info flex items-center"><BriefcaseIcon className="w-7 h-7 mr-2"/> Existing Programs ({programs.length})</h2> {programs.length === 0 ? <p className="text-neutral">No programs created yet.</p> : ( <div className="bg-surface shadow-lg rounded-lg p-4 space-y-3 max-h-[60vh] overflow-y-auto"> {programs.map(p => ( <div key={p.id} className="border border-gray-200 rounded-md p-3 hover:shadow-md transition-shadow"> <div className="flex justify-between items-start"> <h3 className="text-lg font-medium text-texthighlight">{p.name}</h3> <button onClick={() => handleDeleteProgram(p.id)} className="text-danger hover:text-red-700" aria-label={`Delete program ${p.name}`}><TrashIcon className="w-5 h-5"/></button> </div> <p className="text-sm text-neutral mt-1">{p.description}</p> </div> ))} </div> )} </div> </div> );
-      case Page.ManageTasks: if (currentUser.role !== 'admin') return <p>Access Denied.</p>; return ( <div className="grid md:grid-cols-2 gap-8"> <div> <h2 className="text-2xl font-semibold mb-4 text-success flex items-center"><PlusCircleIcon className="w-7 h-7 mr-2" /> Add New Task</h2> <form onSubmit={handleAddTask} className="bg-surface shadow-lg rounded-lg p-6 space-y-4"> <FormInput id="taskTitle" label="Task Title" type="text" value={taskForm.title} onChange={e => setTaskForm(prev => ({ ...prev, title: e.target.value }))} required /> <FormTextarea id="taskDescription" label="Description" value={taskForm.description} onChange={e => setTaskForm(prev => ({ ...prev, description: e.target.value }))} /> <FormTextarea id="taskRequiredSkills" label="Required Skills" value={taskForm.requiredSkills} onChange={e => setTaskForm(prev => ({ ...prev, requiredSkills: e.target.value }))} /> <FormSelect id="taskProgram" label="Related Program (Optional)" value={taskForm.programId || ''} onChange={e => setTaskForm(prev => ({ ...prev, programId: e.target.value }))}> <option value="">None</option> {programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)} </FormSelect> <FormInput id="taskDeadline" label="Deadline (Optional)" type="date" value={taskForm.deadline || ''} onChange={e => setTaskForm(prev => ({ ...prev, deadline: e.target.value }))} /> <button type="submit" className="btn-primary">Add Task</button> </form> </div> <div> <h2 className="text-2xl font-semibold mb-4 text-success flex items-center"><ClipboardListIcon className="w-7 h-7 mr-2"/> Existing Tasks ({tasks.length})</h2> {tasks.length === 0 ? <p className="text-neutral">No tasks created yet.</p> : ( <div className="bg-surface shadow-lg rounded-lg p-4 space-y-3 max-h-[70vh] overflow-y-auto"> {tasks.map(t => ( <div key={t.id} className="border border-gray-200 rounded-md p-3 hover:shadow-md transition-shadow"> <div className="flex justify-between items-start"> <h3 className="text-lg font-medium text-texthighlight">{t.title}</h3> <button onClick={() => handleDeleteTask(t.id)} className="text-danger hover:text-red-700" aria-label={`Delete task ${t.title}`}><TrashIcon className="w-5 h-5"/></button> </div> {t.programName && <p className="text-xs text-info">Program: {t.programName}</p>} {t.deadline && <p className="text-xs text-warning">Deadline: {new Date(t.deadline).toLocaleDateString()}</p>} <p className="text-sm text-neutral mt-1">{t.description}</p> <p className="text-sm text-neutral mt-1"><strong className="text-textlight">Skills:</strong> {t.requiredSkills}</p> </div> ))} </div> )} </div> </div> );
-      case Page.AssignWork: if (currentUser.role !== 'admin') return <p>Access Denied.</p>; return ( <div className="grid md:grid-cols-2 gap-8"> <div> <h2 className="text-2xl font-semibold mb-4 text-primary flex items-center"><LightBulbIcon className="w-7 h-7 mr-2" /> Suggest Assignment</h2> <div className="bg-surface shadow-lg rounded-lg p-6 space-y-4"> <FormSelect id="selectTaskForAssignment" label="Select Task to Assign" value={selectedTaskForAssignment || ''} onChange={e => {setSelectedTaskForAssignment(e.target.value); setAssignmentSuggestion(null); clearMessages();}}> <option value="" disabled>-- Select a Task --</option> {tasks.map(t => <option key={t.id} value={t.id}>{t.title}</option>)} </FormSelect> <button onClick={fetchAssignmentSuggestion} disabled={!selectedTaskForAssignment || isLoadingSuggestion} className="btn-primary"> {isLoadingSuggestion ? 'Getting Suggestion...' : 'Get AI Suggestion'} </button> {isLoadingSuggestion && <LoadingSpinner />} {assignmentSuggestion && ( <div className="mt-4 p-4 border border-primary rounded-md bg-blue-50"> <h3 className="text-lg font-semibold text-texthighlight">AI Suggestion:</h3> {assignmentSuggestion.suggestedPersonName ? ( <> <p>Assign to: <strong className="text-primary">{assignmentSuggestion.suggestedPersonName}</strong></p> <p>Justification: <span className="text-neutral">{assignmentSuggestion.justification}</span></p> <FormInput id="assignmentSpecificDeadline" label="Specific Deadline for this Assignment (Optional, overrides task default)" type="date" value={assignmentForm.specificDeadline || ''} onChange={(e) => setAssignmentForm(prev => ({...prev, specificDeadline: e.target.value}))} /> <button onClick={handleConfirmAssignmentByAdmin} className="btn-success mt-2">Confirm & Propose to User</button> </> ) : ( <p className="text-neutral">{assignmentSuggestion.justification || "AI could not suggest a suitable person."}</p> )} </div> )} </div> </div> <div> <h2 className="text-2xl font-semibold mb-4 text-primary flex items-center"><ClipboardListIcon className="w-7 h-7 mr-2"/> Current Assignments Summary</h2> <div className="bg-surface shadow-lg rounded-lg p-4 space-y-3 max-h-[70vh] overflow-y-auto"> {assignments.length === 0 ? <p className="text-neutral">No tasks assigned yet.</p> : assignments .sort((a, b) => new Date(b.userSubmissionDate || 0).getTime() - new Date(a.userSubmissionDate || 0).getTime()) // Rough sort for demo
+      case Page.UserManagement: if (currentUser?.role !== 'admin') return <p>Access Denied.</p>; const adminManagedPendingUsers = pendingUsers.filter(pu => pu.referringAdminId === currentUser?.id || users.find(u => u.id === pu.referringAdminId)?.role === 'admin' || pu.referringAdminId === "GENERAL_REGISTRATION"); const adminManagedActiveUsers = users.filter(u => u.referringAdminId === currentUser?.id || u.role === 'admin' || users.find(adm => adm.id === u.referringAdminId && adm.role ==='admin')); const generateLinkForAdmin = () => { if (!currentUser || currentUser.role !== 'admin') return; const link = `${window.location.origin}${window.location.pathname}#${Page.PreRegistration}?refAdminId=${currentUser.id}`; setGeneratedLink(link); setSuccessMessage("Pre-registration link generated. Copy it below."); }; const copyLinkToClipboard = () => { if (!generatedLink) return; navigator.clipboard.writeText(generatedLink) .then(() => setSuccessMessage("Link copied to clipboard!")) .catch(err => setError("Failed to copy link: " + err)); }; return ( <div className="space-y-8"> <div> <h2 className="text-2xl font-semibold mb-4 text-primary flex items-center"> <PlusCircleIcon className="w-7 h-7 mr-2" /> {editingUserId ? 'Edit Existing User' : approvingPendingUser ? `Approve Pending User: ${approvingPendingUser.displayName}` : 'Directly Add New User (Managed by You)'} </h2> <form onSubmit={handleSaveOrApproveUserByAdmin} className="bg-surface shadow-lg rounded-lg p-6 space-y-4"> <FormInput id="manage-email" label="Email Address (Login)" type="email" value={userForm.email} onChange={e => setUserForm(prev => ({...prev, email: e.target.value}))} required /> <FormInput id="manage-uniqueId" label="System ID / Username" type="text" value={userForm.uniqueId} onChange={e => setUserForm(prev => ({...prev, uniqueId: e.target.value}))} required readOnly={!!approvingPendingUser && !editingUserId && !!approvingPendingUser.uniqueId} /> <FormInput id="manage-displayName" label="Display Name" type="text" value={userForm.displayName} onChange={e => setUserForm(prev => ({...prev, displayName: e.target.value}))} required readOnly={!!approvingPendingUser && !editingUserId && !!approvingPendingUser.displayName} /> <FormInput id="manage-position" label="Position" type="text" value={userForm.position} onChange={e => setUserForm(prev => ({...prev, position: e.target.value}))} placeholder="e.g., Software Engineer" required /> <FormSelect id="manage-role" label="Role" value={userForm.role} onChange={e => setUserForm(prev => ({...prev, role: e.target.value as Role}))}><option value="user">User</option><option value="admin">Admin</option></FormSelect> <FormTextarea id="manage-userInterests" label="User Interests " value={userForm.userInterests} onChange={e => setUserForm(prev => ({...prev, userInterests: e.target.value}))} placeholder="e.g., Web Development, Event Organization"/> <FormInput id="manage-phone" label="Phone (Contact, Optional)" type="tel" value={userForm.phone} onChange={e => setUserForm(prev => ({...prev, phone: e.target.value}))} placeholder="e.g., +1234567890" /> <FormSelect id="manage-notificationPreference" label="Notification Preference" value={userForm.notificationPreference} onChange={e => setUserForm(prev => ({...prev, notificationPreference: e.target.value as NotificationPreference}))}> <option value="none">None</option> <option value="email">Email</option> <option value="phone">Phone</option> </FormSelect>  <FormInput id="manage-password" label={(editingUserId && !approvingPendingUser) ? "New System Password (Optional)" : "System Password"} type="password" value={userForm.password} onChange={e => setUserForm(prev => ({...prev, password: e.target.value}))} placeholder={(editingUserId && !approvingPendingUser) ? "Leave blank to keep current" : (approvingPendingUser && approvingPendingUser.password) ? "Password set by user (can override)" : "Set a password for the user"} required={!(editingUserId && !approvingPendingUser) && !(approvingPendingUser && approvingPendingUser.password)} description={passwordRequirementsText} /> <FormInput id="manage-confirmPassword" label="Confirm System Password" type="password" value={userForm.confirmPassword} onChange={e => setUserForm(prev => ({...prev, confirmPassword: e.target.value}))} placeholder="Confirm password" required={userForm.password !== '' || (!(editingUserId && !approvingPendingUser) && !(approvingPendingUser && approvingPendingUser.password))} /> <div className="flex space-x-2"> <button type="submit" className="flex-grow btn-primary">{editingUserId ? 'Save Changes' : approvingPendingUser ? 'Approve User & Set Up Account' : 'Add User'}</button> {(editingUserId || approvingPendingUser) && <button type="button" onClick={() => { setEditingUserId(null); setApprovingPendingUser(null); setUserForm(initialUserFormData); clearMessages();}} className="btn-neutral">Cancel</button>}</div> </form> </div> <div className="bg-surface shadow-lg rounded-lg p-6 space-y-4"> <h2 className="text-xl font-semibold text-info flex items-center"><KeyIcon className="w-6 h-6 mr-2"/> Generate Pre-registration Link (for Regular Users)</h2> <p className="text-sm text-neutral">Share this link with regular users to allow them to pre-register under your administration. They will submit their desired System ID and Display Name.</p> <button onClick={generateLinkForAdmin} className="btn-info">Generate My Link</button> {generatedLink && ( <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded"> <p className="text-sm text-blue-700 break-all mb-2">{generatedLink}</p> <button onClick={copyLinkToClipboard} className="btn-secondary text-xs px-2 py-1">Copy to Clipboard</button> </div> )} </div> {pendingUsers.length > 0 && ( <div className="mt-8"> <h2 className="text-xl font-semibold mb-3 text-amber-600 flex items-center">Pending User Approvals ({pendingUsers.length})</h2> <div className="space-y-3 max-h-[40vh] overflow-y-auto pr-2 bg-gray-50 p-4 rounded-lg shadow"> {pendingUsers.map(pu => ( <div key={pu.id} className="bg-white border border-gray-200 rounded-lg p-3"> <div className="flex justify-between items-start"> <div> <h3 className="text-md font-semibold text-amber-700">{pu.displayName}</h3> <p className="text-xs text-gray-600">System ID: {pu.uniqueId}</p> <p className="text-xs text-gray-600">Email: {pu.email || "Not set"}</p> <p className="text-xs text-gray-600">Intended Role: {pu.role}</p> <p className="text-xs text-gray-500 mt-0.5">Submitted: {new Date(pu.submissionDate).toLocaleDateString()}</p> <p className="text-xs text-gray-500 mt-0.5">Ref. Admin ID: {pu.referringAdminId === "GENERAL_REGISTRATION" ? "General Registration" : pu.referringAdminId ? pu.referringAdminId.substring(0,8) + "..." : "N/A"}</p></div> <div className="flex space-x-2"> <button onClick={() => handleInitiateApprovePendingUser(pu)} className="btn-success text-xs px-2 py-1">Review & Approve</button> <button onClick={() => handleRejectPendingUser(pu.id)} className="btn-danger text-xs px-2 py-1">Reject</button> </div> </div> </div> ))} </div> </div> )} <div className="mt-8"> <h2 className="text-xl font-semibold mb-3 text-primary flex items-center"><UsersIcon className="w-6 h-6 mr-2" /> Active Users ({users.length})</h2> {users.length === 0 ? <p className="text-neutral">No active users found.</p> : ( <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-2 bg-gray-50 p-4 rounded-lg shadow"> {users.map(u => ( <div key={u.id} className="bg-white border border-gray-200 rounded-lg p-3"> <div className="flex justify-between items-start"> <div> <h3 className="text-md font-semibold text-texthighlight">{u.displayName} <span className="text-xs px-1.5 py-0.5 bg-accent text-white rounded-full align-middle">{u.role}</span></h3> <p className="text-xs text-gray-600">Email: {u.email}</p> <p className="text-xs text-gray-600">System ID: {u.uniqueId}</p> <p className="text-xs text-gray-500 mt-0.5">Position: {u.position || 'N/A'}</p> <p className="text-xs text-gray-500 mt-0.5 truncate" title={u.userInterests}>Interests: {u.userInterests || 'N/A'}</p> <p className="text-xs text-gray-500 mt-0.5">Phone: {u.phone || 'N/A'}</p> <p className="text-xs text-gray-500 mt-0.5">Notify via: {u.notificationPreference || 'none'}</p> </div> <div className="flex space-x-1"> <button onClick={() => handleEditUserByAdmin(u)} className="text-blue-500 hover:text-blue-700 p-1" aria-label={`Edit user ${u.displayName}`}><UserCircleIcon className="w-4 h-4"/> </button> {currentUser?.id !== u.id && (<button onClick={() => handleDeleteUser(u.id)} className="text-red-500 hover:text-red-700 p-1" aria-label={`Delete user ${u.displayName}`}><TrashIcon className="w-4 h-4" /></button> )} </div> </div> </div> ))} </div> )} </div> </div> );
+      case Page.ManagePrograms: if (currentUser?.role !== 'admin') return <p>Access Denied.</p>; return ( <div className="grid md:grid-cols-2 gap-8"> <div> <h2 className="text-2xl font-semibold mb-4 text-info flex items-center"><PlusCircleIcon className="w-7 h-7 mr-2" /> Add New Program</h2> <form onSubmit={handleAddProgram} className="bg-surface shadow-lg rounded-lg p-6 space-y-4"> <FormInput id="programName" label="Program Name" type="text" value={programForm.name} onChange={e => setProgramForm(prev => ({ ...prev, name: e.target.value }))} required /> <FormTextarea id="programDescription" label="Description" value={programForm.description} onChange={e => setProgramForm(prev => ({ ...prev, description: e.target.value }))} /> <button type="submit" className="btn-primary">Add Program</button> </form> </div> <div> <h2 className="text-2xl font-semibold mb-4 text-info flex items-center"><BriefcaseIcon className="w-7 h-7 mr-2"/> Existing Programs ({programs.length})</h2> {programs.length === 0 ? <p className="text-neutral">No programs created yet.</p> : ( <div className="bg-surface shadow-lg rounded-lg p-4 space-y-3 max-h-[60vh] overflow-y-auto"> {programs.map(p => ( <div key={p.id} className="border border-gray-200 rounded-md p-3 hover:shadow-md transition-shadow"> <div className="flex justify-between items-start"> <h3 className="text-lg font-medium text-texthighlight">{p.name}</h3> <button onClick={() => handleDeleteProgram(p.id)} className="text-danger hover:text-red-700" aria-label={`Delete program ${p.name}`}><TrashIcon className="w-5 h-5"/></button> </div> <p className="text-sm text-neutral mt-1">{p.description}</p> </div> ))} </div> )} </div> </div> );
+      case Page.ManageTasks: if (currentUser?.role !== 'admin') return <p>Access Denied.</p>; return ( <div className="grid md:grid-cols-2 gap-8"> <div> <h2 className="text-2xl font-semibold mb-4 text-success flex items-center"><PlusCircleIcon className="w-7 h-7 mr-2" /> Add New Task</h2> <form onSubmit={handleAddTask} className="bg-surface shadow-lg rounded-lg p-6 space-y-4"> <FormInput id="taskTitle" label="Task Title" type="text" value={taskForm.title} onChange={e => setTaskForm(prev => ({ ...prev, title: e.target.value }))} required /> <FormTextarea id="taskDescription" label="Description" value={taskForm.description} onChange={e => setTaskForm(prev => ({ ...prev, description: e.target.value }))} /> <FormTextarea id="taskRequiredSkills" label="Required Skills" value={taskForm.requiredSkills} onChange={e => setTaskForm(prev => ({ ...prev, requiredSkills: e.target.value }))} /> <FormSelect id="taskProgram" label="Related Program (Optional)" value={taskForm.programId || ''} onChange={e => setTaskForm(prev => ({ ...prev, programId: e.target.value }))}> <option value="">None</option> {programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)} </FormSelect> <FormInput id="taskDeadline" label="Deadline (Optional)" type="date" value={taskForm.deadline || ''} onChange={e => setTaskForm(prev => ({ ...prev, deadline: e.target.value }))} /> <button type="submit" className="btn-primary">Add Task</button> </form> </div> <div> <h2 className="text-2xl font-semibold mb-4 text-success flex items-center"><ClipboardListIcon className="w-7 h-7 mr-2"/> Existing Tasks ({tasks.length})</h2> {tasks.length === 0 ? <p className="text-neutral">No tasks created yet.</p> : ( <div className="bg-surface shadow-lg rounded-lg p-4 space-y-3 max-h-[70vh] overflow-y-auto"> {tasks.map(t => ( <div key={t.id} className="border border-gray-200 rounded-md p-3 hover:shadow-md transition-shadow"> <div className="flex justify-between items-start"> <h3 className="text-lg font-medium text-texthighlight">{t.title}</h3> <button onClick={() => handleDeleteTask(t.id)} className="text-danger hover:text-red-700" aria-label={`Delete task ${t.title}`}><TrashIcon className="w-5 h-5"/></button> </div> {t.programName && <p className="text-xs text-info">Program: {t.programName}</p>} {t.deadline && <p className="text-xs text-warning">Deadline: {new Date(t.deadline).toLocaleDateString()}</p>} <p className="text-sm text-neutral mt-1">{t.description}</p> <p className="text-sm text-neutral mt-1"><strong className="text-textlight">Skills:</strong> {t.requiredSkills}</p> </div> ))} </div> )} </div> </div> );
+      case Page.AssignWork: if (currentUser?.role !== 'admin') return <p>Access Denied.</p>; return ( <div className="grid md:grid-cols-2 gap-8"> <div> <h2 className="text-2xl font-semibold mb-4 text-primary flex items-center"><LightBulbIcon className="w-7 h-7 mr-2" /> Suggest Assignment</h2> <div className="bg-surface shadow-lg rounded-lg p-6 space-y-4"> <FormSelect id="selectTaskForAssignment" label="Select Task to Assign" value={selectedTaskForAssignment || ''} onChange={e => {setSelectedTaskForAssignment(e.target.value); setAssignmentSuggestion(null); clearMessages();}}> <option value="" disabled>-- Select a Task --</option> {tasks.map(t => <option key={t.id} value={t.id}>{t.title}</option>)} </FormSelect> <button onClick={fetchAssignmentSuggestion} disabled={!selectedTaskForAssignment || isLoadingSuggestion} className="btn-primary"> {isLoadingSuggestion ? 'Getting Suggestion...' : 'Get AI Suggestion'} </button> {isLoadingSuggestion && <LoadingSpinner />} {assignmentSuggestion && ( <div className="mt-4 p-4 border border-primary rounded-md bg-blue-50"> <h3 className="text-lg font-semibold text-texthighlight">AI Suggestion:</h3> {assignmentSuggestion.suggestedPersonName ? ( <> <p>Assign to: <strong className="text-primary">{assignmentSuggestion.suggestedPersonName}</strong></p> <p>Justification: <span className="text-neutral">{assignmentSuggestion.justification}</span></p> <FormInput id="assignmentSpecificDeadline" label="Specific Deadline for this Assignment (Optional, overrides task default)" type="date" value={assignmentForm.specificDeadline || ''} onChange={(e) => setAssignmentForm(prev => ({...prev, specificDeadline: e.target.value}))} /> <button onClick={handleConfirmAssignmentByAdmin} className="btn-success mt-2">Confirm & Propose to User</button> </> ) : ( <p className="text-neutral">{assignmentSuggestion.justification || "AI could not suggest a suitable person."}</p> )} </div> )} </div> </div> <div> <h2 className="text-2xl font-semibold mb-4 text-primary flex items-center"><ClipboardListIcon className="w-7 h-7 mr-2"/> Current Assignments Summary</h2> <div className="bg-surface shadow-lg rounded-lg p-4 space-y-3 max-h-[70vh] overflow-y-auto"> {assignments.length === 0 ? <p className="text-neutral">No tasks assigned yet.</p> : assignments .sort((a, b) => (b.userSubmissionDate ? new Date(b.userSubmissionDate).getTime() : 0) - (a.userSubmissionDate ? new Date(a.userSubmissionDate).getTime() : 0)) 
  .map(a => { const task = tasks.find(t => t.id === a.taskId); const person = users.find(u => u.id === a.personId); return ( <div key={`${a.taskId}-${a.personId}`} className="border border-gray-200 rounded-md p-3 hover:shadow-md transition-shadow"> <h3 className="text-md font-medium text-texthighlight">{a.taskTitle}</h3> <p className="text-sm text-neutral">Assigned to: {a.personName || person?.displayName || 'Unknown User'}</p> <p className={`text-sm font-semibold capitalize ${ a.status === 'completed_admin_approved' ? 'text-success' : a.status.startsWith('submitted') ? 'text-info' : a.status === 'accepted_by_user' ? 'text-amber-600' : a.status === 'pending_acceptance' ? 'text-warning' : 'text-danger' }`}> Status: {a.status.replace(/_/g, ' ')} </p> {a.deadline && <p className="text-xs text-neutral">Deadline: {new Date(a.deadline).toLocaleDateString()}</p>} {a.justification && <p className="text-xs text-neutral mt-1 italic">AI Suggestion: {a.justification}</p>} {(a.status === 'submitted_on_time' || a.status === 'submitted_late') && ( <button onClick={() => handleAdminApproveCompletion(a)} className="btn-success text-xs mt-2 px-2 py-1">Approve Completion</button> )} { (a.status === 'pending_acceptance' || a.status === 'accepted_by_user') && ( <button onClick={() => handleAdminUnassignTask(a)} className="btn-danger text-xs mt-2 ml-2 px-2 py-1">Unassign/Clear</button> )} </div> ); })} </div> </div> </div> );
-      case Page.ViewAssignments: /* User's view of their assignments */ const myAssignments = assignments.filter(a => a.personId === currentUser.id); return ( <div className="space-y-6"> <h2 className="text-2xl font-semibold text-primary flex items-center"><ClipboardListIcon className="w-7 h-7 mr-2" />My Task Assignments</h2> {myAssignments.length === 0 ? ( <p className="text-neutral p-4 bg-surface rounded-lg shadow">You have no tasks currently assigned to you, or all your tasks have been completed and approved.</p> ) : ( myAssignments.map(assignment => { const taskDetails = tasks.find(t => t.id === assignment.taskId); const isLateForSubmission = assignment.deadline ? new Date() > new Date(new Date(assignment.deadline).setHours(23, 59, 59, 999)) : false; return ( <div key={assignment.taskId} className="bg-surface shadow-lg rounded-lg p-4"> <h3 className="text-lg font-medium text-texthighlight">{assignment.taskTitle}</h3> {taskDetails?.description && <p className="text-sm text-neutral mt-1">{taskDetails.description}</p>} {taskDetails?.requiredSkills && <p className="text-sm text-neutral mt-1"><strong className="text-textlight">Required Skills:</strong> {taskDetails.requiredSkills}</p>} {assignment.deadline && <p className="text-sm text-neutral mt-1"><strong className="text-textlight">Deadline:</strong> {new Date(assignment.deadline).toLocaleDateString()} {new Date(assignment.deadline) < new Date() && assignment.status !== 'completed_admin_approved' && assignment.status !== 'submitted_on_time' && assignment.status !== 'submitted_late' && <span className="text-danger font-semibold">(Past Due)</span>}</p>} <p className={`text-sm mt-1 font-semibold capitalize ${ assignment.status === 'completed_admin_approved' ? 'text-success' : assignment.status.startsWith('submitted') ? 'text-info' : assignment.status === 'accepted_by_user' ? 'text-amber-600' : assignment.status === 'pending_acceptance' ? 'text-warning' : 'text-danger' }`}> Status: {assignment.status.replace(/_/g, ' ')} </p> {assignment.status === 'pending_acceptance' && ( <div className="mt-3 space-x-2"> <button onClick={() => handleUserAssignmentResponse(assignment, true)} className="btn-success">Accept Task</button> <button onClick={() => handleUserAssignmentResponse(assignment, false)} className="btn-danger">Decline Task</button> </div> )} {assignment.status === 'accepted_by_user' && ( <div className="mt-3"> {assignmentToSubmitDelayReason === assignment.taskId && isLateForSubmission ? ( <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md"> <FormTextarea id={`delay-reason-${assignment.taskId}`} label="Reason for Late Submission:" value={userSubmissionDelayReason} onChange={e => setUserSubmissionDelayReason(e.target.value)} placeholder="Please provide a brief explanation for the delay."/> <button onClick={() => { if (userSubmissionDelayReason.trim()) handleCompleteTaskByUser(assignment, userSubmissionDelayReason); else setError("Reason for delay is required if submitting late."); }} className="btn-primary mt-2">Submit with Reason</button> <button onClick={() => setAssignmentToSubmitDelayReason(null)} className="btn-neutral mt-2 ml-2">Cancel</button> </div> ) : ( <button onClick={() => { if (isLateForSubmission) { setAssignmentToSubmitDelayReason(assignment.taskId); setUserSubmissionDelayReason(''); } else { handleCompleteTaskByUser(assignment); } }} className="btn-primary">Mark as Completed / Submit</button> )} </div> )} {assignment.status === 'submitted_late' && assignment.userDelayReason && ( <p className="text-xs text-neutral mt-1 italic">Reason for delay: {assignment.userDelayReason}</p> )} </div> ); }) )} </div> );
+      case Page.ViewAssignments: /* User's view of their assignments */ if (!currentUser) return <p>Loading assignments...</p>; const myAssignments = assignments.filter(a => a.personId === currentUser.id); return ( <div className="space-y-6"> <h2 className="text-2xl font-semibold text-primary flex items-center"><ClipboardListIcon className="w-7 h-7 mr-2" />My Task Assignments</h2> {myAssignments.length === 0 ? ( <p className="text-neutral p-4 bg-surface rounded-lg shadow">You have no tasks currently assigned to you, or all your tasks have been completed and approved.</p> ) : ( myAssignments.map(assignment => { const taskDetails = tasks.find(t => t.id === assignment.taskId); const isLateForSubmission = assignment.deadline ? new Date() > new Date(new Date(assignment.deadline).setHours(23, 59, 59, 999)) : false; return ( <div key={assignment.taskId} className="bg-surface shadow-lg rounded-lg p-4"> <h3 className="text-lg font-medium text-texthighlight">{assignment.taskTitle}</h3> {taskDetails?.description && <p className="text-sm text-neutral mt-1">{taskDetails.description}</p>} {taskDetails?.requiredSkills && <p className="text-sm text-neutral mt-1"><strong className="text-textlight">Required Skills:</strong> {taskDetails.requiredSkills}</p>} {assignment.deadline && <p className="text-sm text-neutral mt-1"><strong className="text-textlight">Deadline:</strong> {new Date(assignment.deadline).toLocaleDateString()} {new Date(assignment.deadline) < new Date() && assignment.status !== 'completed_admin_approved' && assignment.status !== 'submitted_on_time' && assignment.status !== 'submitted_late' && <span className="text-danger font-semibold">(Past Due)</span>}</p>} <p className={`text-sm mt-1 font-semibold capitalize ${ assignment.status === 'completed_admin_approved' ? 'text-success' : assignment.status.startsWith('submitted') ? 'text-info' : assignment.status === 'accepted_by_user' ? 'text-amber-600' : assignment.status === 'pending_acceptance' ? 'text-warning' : 'text-danger' }`}> Status: {assignment.status.replace(/_/g, ' ')} </p> {assignment.status === 'pending_acceptance' && ( <div className="mt-3 space-x-2"> <button onClick={() => handleUserAssignmentResponse(assignment, true)} className="btn-success">Accept Task</button> <button onClick={() => handleUserAssignmentResponse(assignment, false)} className="btn-danger">Decline Task</button> </div> )} {assignment.status === 'accepted_by_user' && ( <div className="mt-3"> {assignmentToSubmitDelayReason === assignment.taskId && isLateForSubmission ? ( <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md"> <FormTextarea id={`delay-reason-${assignment.taskId}`} label="Reason for Late Submission:" value={userSubmissionDelayReason} onChange={e => setUserSubmissionDelayReason(e.target.value)} placeholder="Please provide a brief explanation for the delay."/> <button onClick={() => { if (userSubmissionDelayReason.trim()) handleCompleteTaskByUser(assignment, userSubmissionDelayReason); else setError("Reason for delay is required if submitting late."); }} className="btn-primary mt-2">Submit with Reason</button> <button onClick={() => setAssignmentToSubmitDelayReason(null)} className="btn-neutral mt-2 ml-2">Cancel</button> </div> ) : ( <button onClick={() => { if (isLateForSubmission) { setAssignmentToSubmitDelayReason(assignment.taskId); setUserSubmissionDelayReason(''); } else { handleCompleteTaskByUser(assignment); } }} className="btn-primary">Mark as Completed / Submit</button> )} </div> )} {assignment.status === 'submitted_late' && assignment.userDelayReason && ( <p className="text-xs text-neutral mt-1 italic">Reason for delay: {assignment.userDelayReason}</p> )} </div> ); }) )} </div> );
       case Page.ViewTasks: /* User's view of all available tasks (not assigned to them) */ const unassignedTasks = tasks.filter(task => !assignments.some(a => a.taskId === task.id && (a.status !== 'declined_by_user' && a.status !== 'completed_admin_approved'))); return ( <div className="space-y-6"> <h2 className="text-2xl font-semibold text-primary flex items-center"><BriefcaseIcon className="w-7 h-7 mr-2" />Available Tasks</h2> {unassignedTasks.length === 0 ? <p className="text-neutral p-4 bg-surface rounded-lg shadow">No tasks are currently available or all tasks have been assigned.</p> : ( unassignedTasks.map(task => ( <div key={task.id} className="bg-surface shadow-lg rounded-lg p-4"> <h3 className="text-lg font-medium text-texthighlight">{task.title}</h3> {task.programName && <p className="text-xs text-info">Program: {task.programName}</p>} {task.deadline && <p className="text-xs text-warning">Deadline: {new Date(task.deadline).toLocaleDateString()}</p>} <p className="text-sm text-neutral mt-1">{task.description}</p> <p className="text-sm text-neutral mt-1"><strong className="text-textlight">Skills:</strong> {task.requiredSkills}</p> </div> )) )} </div> );
       default: return <p>Page not found.</p>;
     }
@@ -1324,7 +1306,6 @@ const createTestTask = () => {
     </div>
   );
   
-  // Conditional rendering based on currentPage
   if (currentPage === Page.Login && !currentUser) {
     return renderAuthContainer(authView === 'login' ? renderNewAuthLoginPage() : renderNewAuthRegisterPage());
   }
@@ -1343,12 +1324,12 @@ const createTestTask = () => {
     );
   }
   if (!currentUser) { 
-    // This will show if not on Login/PreReg and no currentUser (e.g. after data load but before hash processing redirects)
-    // Or if hash processing logic somehow fails to redirect to login when currentUser is null.
-    return renderAuthContainer(renderNewAuthLoginPage());
+    // This should be caught by the useEffect routing logic which depends on currentUser.
+    // If somehow reached, redirect to login.
+    // navigateTo(Page.Login); // This might cause infinite loop if navigateTo isn't careful.
+    return renderAuthContainer(renderNewAuthLoginPage()); // Safer to just show login.
   }
   
-  // Main application layout for logged-in users
   const navItems = [
     { page: Page.Dashboard, label: 'Dashboard', icon: <LightBulbIcon className="w-5 h-5 mr-2" /> },
     { page: Page.UserProfile, label: 'My Profile', icon: <UserCircleIcon className="w-5 h-5 mr-2" /> },
@@ -1400,7 +1381,7 @@ const createTestTask = () => {
       </main>
       <footer className="bg-neutral text-center py-4 text-sm text-gray-300">
         <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. All rights reserved.  Powered By SHAIK MOHAMMED NAWAZ.</p>
-        <p className="text-xs text-gray-400 mt-1">Data is currently stored locally in your browser. For internet-accessible storage, integration with a backend service is required.</p>
+        <p className="text-xs text-gray-400 mt-1">Data is currently fetched from a backend service. Ensure the backend is operational.</p>
       </footer>
     </div>
   );
