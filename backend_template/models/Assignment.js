@@ -2,10 +2,10 @@
 const mongoose = require("mongoose");
 
 const assignmentSchema = new mongoose.Schema({
-  name: String,
-  data: mongoose.Schema.Types.Mixed
+  title: String,
+  description: String,
+  assignedTo: String,
+  dueDate: Date,
 });
 
-const Assignment = mongoose.model("Assignment", assignmentSchema);
-
-module.exports = { Assignment };
+module.exports = mongoose.model("Assignment", assignmentSchema);

@@ -1,19 +1,13 @@
 
 const express = require("express");
 const router = express.Router();
-const { Assignment } = require("../models/Assignment");
+const Assignment = require("../models/Assignment");
 
-// GET all
 router.get("/", async (req, res) => {
-  try {
-    const data = await Assignment.find();
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const assignments = await Assignment.find();
+  res.json(assignments);
 });
 
-// POST (replace all)
 router.post("/", async (req, res) => {
   try {
     await Assignment.deleteMany({});

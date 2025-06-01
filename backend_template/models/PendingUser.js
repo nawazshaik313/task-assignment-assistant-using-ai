@@ -1,11 +1,11 @@
 
 const mongoose = require("mongoose");
 
-const pendinguserSchema = new mongoose.Schema({
-  name: String,
-  data: mongoose.Schema.Types.Mixed
+const pendingUserSchema = new mongoose.Schema({
+  email: String,
+  password: String,
+  displayName: String,
+  role: String
 });
 
-const PendingUser = mongoose.model("PendingUser", pendinguserSchema);
-
-module.exports = { PendingUser };
+module.exports = mongoose.model("PendingUser", pendingUserSchema);

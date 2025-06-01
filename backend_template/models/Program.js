@@ -3,9 +3,7 @@ const mongoose = require("mongoose");
 
 const programSchema = new mongoose.Schema({
   name: String,
-  data: mongoose.Schema.Types.Mixed
+  description: String,
 });
 
-const Program = mongoose.model("Program", programSchema);
-
-module.exports = { Program };
+module.exports = mongoose.model("Program", programSchema);

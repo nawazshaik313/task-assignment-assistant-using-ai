@@ -1,11 +1,10 @@
 
 const mongoose = require("mongoose");
 
-const adminlogSchema = new mongoose.Schema({
-  name: String,
-  data: mongoose.Schema.Types.Mixed
+const adminLogSchema = new mongoose.Schema({
+  action: String,
+  user: String,
+  timestamp: { type: Date, default: Date.now }
 });
 
-const AdminLog = mongoose.model("AdminLog", adminlogSchema);
-
-module.exports = { AdminLog };
+module.exports = mongoose.model("AdminLog", adminLogSchema);

@@ -1,24 +1,18 @@
 
 const express = require("express");
 const router = express.Router();
-const { CurrentUser } = require("../models/CurrentUser");
+const CurrentUser = require("../models/CurrentUser");
 
-// GET all
 router.get("/", async (req, res) => {
-  try {
-    const data = await CurrentUser.find();
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const users = await CurrentUser.find();
+  res.json(users);
 });
 
-// POST (replace all)
 router.post("/", async (req, res) => {
   try {
     await CurrentUser.deleteMany({});
     await CurrentUser.insertMany(req.body);
-    res.json({ message: "CurrentUsers saved successfully" });
+    res.json({ message: "Current user saved successfully" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

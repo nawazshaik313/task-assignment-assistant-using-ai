@@ -1,25 +1,23 @@
+
 const express = require("express");
 const router = express.Router();
 const User = require("../models/User");
 
-// Get all users
 router.get("/", async (req, res) => {
   const users = await User.find();
   res.json(users);
 });
 
-// Create or update users list (replace all)
 router.post("/", async (req, res) => {
   try {
     await User.deleteMany({});
     await User.insertMany(req.body);
-    res.json({ message: "Users updated successfully" });
+    res.json({ message: "Users saved successfully" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Login user
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
   const user = await User.findOne({ email });
