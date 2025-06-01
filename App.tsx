@@ -154,21 +154,21 @@ export const App = (): JSX.Element => {
         loadedAdminLogs,
         loadedCurrentUser
       ] = await Promise.all([
-        fetch("https://task-management-backend-17a5.onrender.com/api/users")
+        fetch("https://task-assignment-assistant-using-ai.onrender.com/api/users")
   .then(res => res.json()),
-       fetch("https://task-management-backend-17a5.onrender.com/api/pending-users")
+       fetch("https://task-assignment-assistant-using-ai.onrender.com/api/pending-users")
   .then(res => res.json()),
-        fetch("https://task-management-backend-17a5.onrender.com/api/tasks")
+        fetch("https://task-assignment-assistant-using-ai.onrender.com/api/tasks")
           .then(res => res.json())
           .then(data => {
             console.log("Fetched tasks:", data);
             setTasks(data);
           })
           .catch(err => console.error("Error fetching tasks:", err)),
-        fetch("https://task-management-backend-17a5.onrender.com/api/programs").then(res => res.json()),
-        fetch("https://task-management-backend-17a5.onrender.com/api/assignments").then(res => res.json()),
-        fetch("https://task-management-backend-17a5.onrender.com/api/admin-logs").then(res => res.json()),
-        fetch("https://task-management-backend-17a5.onrender.com/api/current-user").then(res => res.json())
+        fetch("https://task-assignment-assistant-using-ai.onrender.com/api/programs").then(res => res.json()),
+        fetch("https://task-assignment-assistant-using-ai.onrender.com/api/assignments").then(res => res.json()),
+        fetch("https://task-assignment-assistant-using-ai.onrender.com/api/admin-logs").then(res => res.json()),
+        fetch("https://task-assignment-assistant-using-ai.onrender.com/api/current-user").then(res => res.json())
        
       ]);
 
@@ -185,7 +185,7 @@ export const App = (): JSX.Element => {
 
 
 const createTestTask = () => {
-  fetch("https://task-management-backend-17a5.onrender.com/api/tasks", {
+  fetch("https://task-assignment-assistant-using-ai.onrender.com/api/tasks", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -363,7 +363,7 @@ const createTestTask = () => {
         };
         const updatedUsers = [...users, newAdminUser];
         setUsers(updatedUsers);
-        await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
+        await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/users", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -391,7 +391,7 @@ const createTestTask = () => {
         };
         const updatedUsers = [...users, newAdminUser];
         setUsers(updatedUsers);
-        await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
+        await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/users", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -427,7 +427,7 @@ const createTestTask = () => {
 
         const updatedPendingUsers = [...pendingUsers, newPendingUser];
         setPendingUsers(updatedPendingUsers);
-        await fetch("https://task-management-backend-17a5.onrender.com/api/pending-users", {
+        await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/pending-users", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify(updatedPendingUsers),
@@ -481,7 +481,7 @@ const createTestTask = () => {
     if (user) { 
       if (user.password === passwordToLogin) { 
         setCurrentUser(user); 
-        await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
+        await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/users", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -557,7 +557,7 @@ const createTestTask = () => {
     };
     const updatedPendingUsers = [...pendingUsers, newPendingUser];
     setPendingUsers(updatedPendingUsers);
-    await fetch("https://task-management-backend-17a5.onrender.com/api/pending-users", {
+    await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/pending-users", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify(updatedPendingUsers),
@@ -586,7 +586,7 @@ const createTestTask = () => {
   const handleLogout = async () => { 
       clearMessages(); 
       setCurrentUser(null); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
+      await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/users", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -635,7 +635,7 @@ const createTestTask = () => {
     }; 
     const updatedUsers = users.map(u => (u.id === currentUser.id ? updatedUser : u));
     setUsers(updatedUsers); 
-    await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
+    await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/users", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -644,7 +644,7 @@ const createTestTask = () => {
 });
 
     setCurrentUser(updatedUser); 
-    await fetch("https://task-management-backend-17a5.onrender.com/api/users/current", {
+    await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/users/current", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -726,7 +726,7 @@ const createTestTask = () => {
       }; 
       const newUsersList = users.map(u => u.id === editingUserId ? updatedUserRec : u);
       setUsers(newUsersList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
+      await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/users", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -750,7 +750,7 @@ const createTestTask = () => {
       }; 
       const newUsersList = [...users, newUserRec];
       setUsers(newUsersList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
+      await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/users", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -761,7 +761,7 @@ const createTestTask = () => {
       if (approvingPendingUser) { 
         const newPendingUsersList = pendingUsers.filter(pu => pu.id !== approvingPendingUser.id);
         setPendingUsers(newPendingUsersList); 
-        await fetch("https://task-management-backend-17a5.onrender.com/api/pending-users", {
+        await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/pending-users", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -812,7 +812,7 @@ const createTestTask = () => {
   const handleRejectPendingUser = async (pendingUserId: string) => { 
       const newPendingUsersList = pendingUsers.filter(pu => pu.id !== pendingUserId);
       setPendingUsers(newPendingUsersList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/pending-users", {
+      await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/pending-users", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -828,7 +828,7 @@ const createTestTask = () => {
       if (userId === currentUser?.id) { setError("You cannot delete your own account."); return; } 
       const newUsersList = users.filter(u => u.id !== userId);
       setUsers(newUsersList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/users", {
+      await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/users", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -837,7 +837,7 @@ const createTestTask = () => {
 });
       const newAssignmentsList = assignments.filter(a => a.personId !== userId);
       setAssignments(newAssignmentsList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", {
+      await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/assignments", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -853,7 +853,7 @@ const createTestTask = () => {
       const newProgramRec: Program = { ...programForm, id: Date.now().toString() }; 
       const newProgramsList = [...programs, newProgramRec];
       setPrograms(newProgramsList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/programs", {
+      await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/programs", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -871,7 +871,7 @@ const createTestTask = () => {
           if (!window.confirm("This program is linked to tasks. Deleting it will unlink these tasks. Are you sure?")) { return; } 
           newTasksList = tasks.map(task => task.programId === id ? {...task, programId: undefined, programName: undefined } : task);
           setTasks(newTasksList);
-          await fetch("https://task-management-backend-17a5.onrender.com/api/tasks", {
+          await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/tasks", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -881,7 +881,7 @@ const createTestTask = () => {
       } 
       const newProgramsList = programs.filter(p => p.id !== id);
       setPrograms(newProgramsList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/programs", {
+      await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/programs", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -897,7 +897,7 @@ const createTestTask = () => {
       const newTaskRec: Task = { id: Date.now().toString(), title: taskForm.title, description: taskForm.description, requiredSkills: taskForm.requiredSkills, programId: taskForm.programId || undefined, programName: program ? program.name : undefined, deadline: taskForm.deadline || undefined }; 
       const newTasksList = [...tasks, newTaskRec];
       setTasks(newTasksList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/tasks", {
+      await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/tasks", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -911,7 +911,7 @@ const createTestTask = () => {
       clearMessages(); 
       const newTasksList = tasks.filter(t => t.id !== id);
       setTasks(newTasksList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/tasks", {
+      await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/tasks", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -920,7 +920,7 @@ const createTestTask = () => {
 });
       const newAssignmentsList = assignments.filter(a => a.taskId !== id);
       setAssignments(newAssignmentsList);  
-      await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", {
+      await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/assignments", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -945,7 +945,7 @@ const createTestTask = () => {
     const newAssignmentRec: Assignment = { taskId: task.id, personId: person.id, taskTitle: task.title, personName: person.displayName, justification: assignmentSuggestion.justification, status: 'pending_acceptance', deadline: assignmentDeadline }; 
     const newAssignmentsList = [...assignments.filter(a => a.taskId !== task.id || (a.status === 'declined_by_user' || a.status === 'completed_admin_approved')), newAssignmentRec];
     setAssignments(newAssignmentsList); 
-    await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", {
+    await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/assignments", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -981,7 +981,7 @@ const createTestTask = () => {
       adminNotificationMessage = 'declined';
     } 
     setAssignments(updatedAssignmentsList);
-    await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", {
+    await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/assignments", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -1004,7 +1004,7 @@ const createTestTask = () => {
     const newStatus: AssignmentStatus = isLate ? 'submitted_late' : 'submitted_on_time'; 
     const updatedAssignmentsList = assignments.map(a => a.taskId === assignment.taskId && a.personId === currentUser.id ? { ...a, status: newStatus, userSubmissionDate: submissionDate.toISOString(), userDelayReason: isLate ? delayReason : undefined, } : a ); 
     setAssignments(updatedAssignmentsList); 
-    await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", {
+    await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/assignments", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -1028,7 +1028,7 @@ const createTestTask = () => {
     if (!currentUser || currentUser.role !== 'admin') { setError("Only admins can approve task completion."); return; } 
     const updatedAssignmentsList = assignments.map(a => a.taskId === assignment.taskId && a.personId === assignment.personId ? { ...a, status: 'completed_admin_approved' as AssignmentStatus } : a ); 
     setAssignments(updatedAssignmentsList); 
-    await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", {
+    await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/assignments", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -1048,7 +1048,7 @@ const createTestTask = () => {
       if (!currentUser || currentUser.role !== 'admin') { setError("Action not permitted."); return; } 
       const newAssignmentsList = assignments.filter(a => !(a.taskId === assignmentToClear.taskId && a.personId === assignmentToClear.personId));
       setAssignments(newAssignmentsList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/assignments", {
+      await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/assignments", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -1080,7 +1080,7 @@ const createTestTask = () => {
       const newLogEntryRec: AdminLogEntry = { id: Date.now().toString(), adminId: currentUser.id, adminDisplayName: currentUser.displayName, timestamp: new Date().toISOString(), logText: adminLogText.trim(), ...(imagePreviewUrl && { imagePreviewUrl }), }; 
       const newAdminLogsList = [newLogEntryRec, ...adminLogs];
       setAdminLogs(newAdminLogsList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/adminLogs", {
+      await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/adminLogs", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -1098,7 +1098,7 @@ const createTestTask = () => {
       if (!currentUser || currentUser.role !== 'admin') return; 
       const newAdminLogsList = adminLogs.filter(log => log.id !== logId);
       setAdminLogs(newAdminLogsList); 
-      await fetch("https://task-management-backend-17a5.onrender.com/api/adminLogs", {
+      await fetch("https://task-assignment-assistant-using-ai.onrender.com/api/adminLogs", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
