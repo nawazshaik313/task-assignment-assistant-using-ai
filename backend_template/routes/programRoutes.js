@@ -17,7 +17,7 @@ router.get("/", async (req, res) => {
 router.post("/", async (req, res) => {
   try {
     await Program.deleteMany({});
-    await Program.insertMany(req.body);
+    await Program.insertMany(req.body); 
     res.json({ message: "Programs saved successfully" });
   } catch (err) {
     res.status(500).json({ error: err.message });
