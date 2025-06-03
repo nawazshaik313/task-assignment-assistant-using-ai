@@ -3,8 +3,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Page, User, Role, Task, Assignment, Program, GeminiSuggestion, NotificationPreference, AssignmentStatus, PendingUser, AdminLogEntry } from './types';
 import useLocalStorage from './hooks/useLocalStorage';
 import { getAssignmentSuggestion } from './services/geminiService';
-import * as emailService from './utils/emailService';
-import { validatePassword } from './utils/validation';
+import * as emailService from './src/utils/emailService';
+import { validatePassword } from './src/utils/validation';
 // import * //as cloudDataService from './services/cloudDataService'; // Deactivated
 import LoadingSpinner from './components/LoadingSpinner';
 import { UsersIcon, ClipboardListIcon, LightBulbIcon, CheckCircleIcon, TrashIcon, PlusCircleIcon, KeyIcon, BriefcaseIcon, LogoutIcon, UserCircleIcon } from './components/Icons';
