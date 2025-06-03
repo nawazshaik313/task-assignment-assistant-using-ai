@@ -230,6 +230,12 @@ export const App = (): JSX.Element => {
         setAssignments(loadedAssignments || []);
         setAdminLogs(loadedAdminLogs || []);
         
+        // Update newRegistrationForm.role if this is the first load and no users exist
+        if ((loadedUsers || []).length === 0) {
+            setNewRegistrationForm(prev => ({ ...prev, role: 'admin' }));
+        } else {
+            setNewRegistrationForm(prev => ({ ...prev, role: 'user' }));
+        }
         console.log("Initial data fetched from backend.");
 
       } catch (err: any) {
@@ -360,7 +366,7 @@ export const App = (): JSX.Element => {
   const handleNewRegistration = async (e: React.FormEvent) => {
     e.preventDefault();
     clearMessages();
-    const { name, email, password, confirmPassword, role } = newRegistrationForm;
+    const { name, email, password, confirmPassword, role: formRole } = newRegistrationForm;
 
     if (!name.trim() || !email.trim() || !password.trim() || !confirmPassword.trim()) {
       setError("All fields are required.");
@@ -387,11 +393,13 @@ export const App = (): JSX.Element => {
       return;
     }
     
+    const actualRoleToRegister = users.length === 0 ? 'admin' : formRole;
+    
     const newPendingUserData = {
         displayName: name,
         email: email,
         password: password, 
-        role: users.length === 0 ? 'admin' : role, // First user becomes admin if no admins exist
+        role: actualRoleToRegister,
         uniqueId: email, // Default uniqueId to email for general registration
         submissionDate: new Date().toISOString(),
     };
@@ -402,7 +410,7 @@ export const App = (): JSX.Element => {
         body: JSON.stringify(newPendingUserData),
       });
 
-      if (createdPendingUser) {
+      if (createdPendingUser && createdPendingUser.id) { // Check for ID as a sign of successful creation
         setPendingUsers(prev => [...prev, createdPendingUser]);
         setSuccessMessage("Registration submitted successfully! Your account is pending administrator approval. You will be notified via email once it's active.");
         setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user' }); 
@@ -413,7 +421,7 @@ export const App = (): JSX.Element => {
           emailService.sendNewPendingRegistrationToAdminEmail(adminToNotify.email, adminToNotify.displayName, createdPendingUser.displayName, createdPendingUser.email);
         }
       } else {
-        setError("Failed to submit registration. The server did not confirm creation.");
+        setError("Failed to submit registration. The server did not confirm creation or returned unexpected data.");
       }
     } catch (err: any) {
        setError(err.message || "Failed to submit registration. Please check details or try again later.");
@@ -464,7 +472,7 @@ export const App = (): JSX.Element => {
         body: JSON.stringify(newPendingUserData),
       });
 
-      if (createdPendingUser) {
+      if (createdPendingUser && createdPendingUser.id) {
         setPendingUsers(prev => [...prev, createdPendingUser]);
         setSuccessMessage("Pre-registration submitted successfully! Your account is pending administrator approval. You will be notified via email.");
         setPreRegistrationForm(prev => ({ ...initialPreRegistrationFormState, referringAdminId: prev.referringAdminId, referringAdminDisplayName: prev.referringAdminDisplayName, isReferralLinkValid: prev.isReferralLinkValid }));
@@ -481,7 +489,7 @@ export const App = (): JSX.Element => {
             }
         }
       } else {
-         setError("Failed to submit pre-registration. Server did not confirm creation.");
+         setError("Failed to submit pre-registration. Server did not confirm creation or returned unexpected data.");
       }
     } catch (err: any) {
       setError(err.message || "Failed to submit pre-registration. Please try again later.");
@@ -508,7 +516,7 @@ export const App = (): JSX.Element => {
         body: JSON.stringify({ email, password }),
       });
 
-      if (loggedInUser) {
+      if (loggedInUser && loggedInUser.id) {
         setCurrentUser(loggedInUser);
         
         // Re-fetch all data after login for consistency
@@ -527,6 +535,15 @@ export const App = (): JSX.Element => {
         setPrograms(updatedPrograms || []);
         setAssignments(updatedAssignments || []);
         setAdminLogs(updatedAdminLogs || []);
+        
+        if ((updatedUsers || []).length === 0 && loggedInUser.role !== 'admin') {
+             // This should ideally not happen if login implies user exists.
+             // But as a safeguard for the role logic if it's the first user somehow.
+            setNewRegistrationForm(prev => ({ ...prev, role: 'admin' }));
+        } else if ((updatedUsers || []).length > 0 && newRegistrationForm.role === 'admin') {
+            setNewRegistrationForm(prev => ({ ...prev, role: 'user' }));
+        }
+
         setIsLoadingAppData(false);
 
         setSuccessMessage(`Welcome back, ${loggedInUser.displayName}!`);
@@ -555,13 +572,14 @@ export const App = (): JSX.Element => {
       // Potentially inform user if logout API fails but still proceed with client-side logout
     }
     setCurrentUser(null); 
-    setUsers([]); // Clear data that might be user-specific
+    setUsers([]); 
     setPendingUsers([]);
     setTasks([]);
     setPrograms([]);
     setAssignments([]);
     setAdminLogs([]);
     setSuccessMessage("You have been logged out successfully.");
+    setNewRegistrationForm(prev => ({ ...prev, role: 'user' })); // Reset for next potential registration
     navigateTo(Page.Login);
   };
 
@@ -611,14 +629,14 @@ export const App = (): JSX.Element => {
         body: JSON.stringify(updatePayload),
       });
 
-      if (updatedUserFromServer) {
+      if (updatedUserFromServer && updatedUserFromServer.id) {
         setUsers(users.map(u => u.id === currentUser.id ? updatedUserFromServer : u));
         setCurrentUser(updatedUserFromServer); 
         setSuccessMessage("Profile updated successfully!");
         setUserForm(prev => ({ ...prev, password: '', confirmPassword: '' })); 
         await addAdminLogEntry(`User profile updated for ${updatedUserFromServer.displayName} (ID: ${updatedUserFromServer.uniqueId}).`);
       } else {
-        setError("Failed to update profile. Server did not confirm update.");
+        setError("Failed to update profile. Server did not confirm update or returned unexpected data.");
       }
     } catch (err: any) {
       setError(err.message || "Failed to update profile.");
@@ -680,7 +698,7 @@ export const App = (): JSX.Element => {
         body: JSON.stringify(updatePayload),
       });
       
-      if (updatedUserFromServer) {
+      if (updatedUserFromServer && updatedUserFromServer.id) {
         setUsers(users.map(u => u.id === editingUserId ? updatedUserFromServer : u));
         if(currentUser && currentUser.id === editingUserId) { 
             setCurrentUser(updatedUserFromServer);
@@ -691,7 +709,7 @@ export const App = (): JSX.Element => {
         await addAdminLogEntry(`Admin updated user profile for ${updatedUserFromServer.displayName} (ID: ${updatedUserFromServer.uniqueId}). Role set to ${role}.`);
         navigateTo(Page.UserManagement);
       } else {
-        setError("Failed to update user. Server did not confirm update.");
+        setError("Failed to update user. Server did not confirm update or returned unexpected data.");
       }
     } catch (err:any) {
       setError(err.message || "Failed to update user.");
@@ -744,7 +762,7 @@ export const App = (): JSX.Element => {
         body: JSON.stringify(newUserData),
       });
 
-      if (createdUser) {
+      if (createdUser && createdUser.id) {
         setUsers(prev => [...prev, createdUser]);
         setSuccessMessage(`User ${createdUser.displayName} created successfully!`);
         setUserForm(initialUserFormData); 
@@ -752,7 +770,7 @@ export const App = (): JSX.Element => {
         await addAdminLogEntry(`Admin created new user: ${createdUser.displayName} (ID: ${createdUser.uniqueId}), Role: ${createdUser.role}.`);
         navigateTo(Page.UserManagement);
       } else {
-        setError("Failed to create user. Server did not confirm creation.");
+        setError("Failed to create user. Server did not confirm creation or returned unexpected data.");
       }
     } catch (err:any) {
       setError(err.message || "Failed to create user.");
@@ -787,7 +805,7 @@ export const App = (): JSX.Element => {
         body: JSON.stringify(finalUserDataForCreation),
       });
 
-      if (createdUser) {
+      if (createdUser && createdUser.id) {
         setUsers(prev => [...prev, createdUser]); // Add to active users
 
         // Then delete the pending user
@@ -801,7 +819,7 @@ export const App = (): JSX.Element => {
         emailService.sendAccountActivatedByAdminEmail(createdUser.email, createdUser.displayName, currentUser.displayName);
         await addAdminLogEntry(`Admin ${currentUser.displayName} approved pending user: ${createdUser.displayName} (ID: ${createdUser.uniqueId}).`);
       } else {
-        setError("Failed to create user from pending registration. Server did not confirm user creation.");
+        setError("Failed to create user from pending registration. Server did not confirm user creation or returned unexpected data.");
       }
     } catch (err:any) {
       setError(err.message || "Failed to approve user.");
@@ -878,13 +896,13 @@ export const App = (): JSX.Element => {
         method: 'POST',
         body: JSON.stringify(newProgramData),
       });
-      if (createdProgram) {
+      if (createdProgram && createdProgram.id) {
         setPrograms(prev => [...prev, createdProgram]);
         setSuccessMessage("Program created successfully!");
         setProgramForm({ name: '', description: '' }); 
         if(currentUser) await addAdminLogEntry(`Admin ${currentUser.displayName} created program: ${createdProgram.name}.`);
       } else {
-        setError("Failed to create program. Server did not confirm creation.");
+        setError("Failed to create program. Server did not confirm creation or returned unexpected data.");
       }
     } catch (err:any) {
       setError(err.message || "Failed to create program.");
@@ -929,13 +947,13 @@ export const App = (): JSX.Element => {
         method: 'POST',
         body: JSON.stringify(newTaskData),
       });
-      if (createdTask) {
+      if (createdTask && createdTask.id) {
         setTasks(prev => [...prev, createdTask]);
         setSuccessMessage("Task created successfully!");
         setTaskForm({ title: '', description: '', requiredSkills: '', programId: '', deadline: '' }); 
         if(currentUser) await addAdminLogEntry(`Admin ${currentUser.displayName} created task: ${createdTask.title}.`);
       } else {
-        setError("Failed to create task. Server did not confirm creation.");
+        setError("Failed to create task. Server did not confirm creation or returned unexpected data.");
       }
     } catch (err:any) {
       setError(err.message || "Failed to create task.");
@@ -1037,7 +1055,7 @@ export const App = (): JSX.Element => {
         body: JSON.stringify(newAssignmentData),
       });
 
-      if (createdAssignment) {
+      if (createdAssignment && createdAssignment.taskId && createdAssignment.personId ) { // Check for core fields
         setAssignments(prev => [...prev, createdAssignment]); 
         setSuccessMessage(`Task "${task.title}" assigned to ${person.displayName}.`);
         setSelectedTaskForAssignment(null);
@@ -1049,7 +1067,7 @@ export const App = (): JSX.Element => {
         }
         if(currentUser) await addAdminLogEntry(`Admin ${currentUser.displayName} assigned task "${task.title}" to ${person.displayName}. Justification: ${justification}`);
       } else {
-        setError("Failed to assign task. Server did not confirm creation.");
+        setError("Failed to assign task. Server did not confirm creation or returned unexpected data.");
       }
     } catch (err:any) {
       setError(err.message || "Failed to assign task.");
@@ -1072,11 +1090,11 @@ export const App = (): JSX.Element => {
         body: JSON.stringify(payload),
       });
 
-      if (updatedAssignment) {
+      if (updatedAssignment && updatedAssignment.taskId && updatedAssignment.personId) {
         setAssignments(prev => prev.map(a => (a.taskId === taskId && a.personId === personId) ? updatedAssignment : a));
         return updatedAssignment;
       } else {
-        setError(`Failed to update task status to ${newStatus}. Server did not confirm update.`);
+        setError(`Failed to update task status to ${newStatus}. Server did not confirm update or returned unexpected data.`);
         return null;
       }
     } catch (err:any) {
@@ -1126,7 +1144,7 @@ export const App = (): JSX.Element => {
     let newStatus: AssignmentStatus = 'submitted_on_time';
     if (assignment.deadline && submissionDate > new Date(assignment.deadline)) {
       newStatus = 'submitted_late';
-      if (!delayReason && assignmentToSubmitDelayReason === taskId) {
+      if (!delayReason && assignmentToSubmitDelayReason === `${assignment.taskId}-${assignment.personId}`) { // Check specific assignment
         setError("A reason is required for late submission.");
         return; 
       }
@@ -1182,15 +1200,15 @@ export const App = (): JSX.Element => {
           method: 'POST',
           body: JSON.stringify(newLogData),
         });
-        if (createdLog) {
+        if (createdLog && createdLog.id) {
           setAdminLogs(prev => [createdLog, ...prev]); 
         } else {
-          console.error("Failed to save admin log to backend: No log returned.");
-          setError("Failed to save admin log (server did not confirm).");
+          console.error("Failed to save admin log to backend: No log returned or missing ID.");
+          // setError("Failed to save admin log (server did not confirm)."); // Avoid overwriting more specific errors
         }
     } catch (error: any) {
         console.error("Failed to save admin log to backend:", error);
-        setError("Failed to save admin log: " + error.message);
+        // setError("Failed to save admin log: " + error.message); // Avoid overwriting
     }
   };
 
@@ -1230,7 +1248,7 @@ export const App = (): JSX.Element => {
         const fileInput = document.getElementById('adminLogImage') as HTMLInputElement;
         if (fileInput) fileInput.value = ''; 
     } catch (err: any) {
-        // Error is handled by addAdminLogEntry
+        setError("Failed to submit admin log: " + err.message);
     } finally {
         setIsSubmittingLog(false);
     }
@@ -1422,16 +1440,15 @@ export const App = (): JSX.Element => {
                   autoComplete="new-password"
                 />
               </div>
-              { // Only show role selection if there's already an admin, or if it's the very first registration
-                 (users.some(u => u.role === 'admin') || users.length === 0) && ( 
+              { 
                 <div>
                   <label htmlFor="regRole" className="block text-sm font-medium text-textlight">Role</label>
                   <AuthFormSelect
                     id="regRole"
                     aria-label="Role for registration"
-                    value={newRegistrationForm.role}
-                    onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, role: users.length === 0 ? 'admin' : e.target.value as Role })}
-                    disabled={users.length === 0} // First user is admin
+                    value={users.length === 0 ? 'admin' : newRegistrationForm.role}
+                    onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, role: e.target.value as Role })}
+                    disabled={users.length === 0} 
                   >
                     <option value="user">User</option>
                     {users.length === 0 && <option value="admin">Admin (First User)</option>}
@@ -1440,7 +1457,7 @@ export const App = (): JSX.Element => {
                     {users.length === 0 ? "First user will be registered as Admin." : "General registration is for 'User' role."}
                   </p>
                 </div>
-              )}
+              }
               <button 
                 type="submit" 
                 className="w-full py-3 px-4 bg-authButton hover:bg-authButtonHover text-textlight font-semibold rounded-md shadow-sm transition-colors text-sm"
@@ -1470,7 +1487,7 @@ export const App = (): JSX.Element => {
           )}
         </div>
         <footer className="text-center py-6 text-sm text-neutral mt-auto">
-          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by SHAIK MOHAMMED NAWAZ.</p>
+          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by SHAIK MOAHAMMED NAWAZ.</p>
         </footer>
       </div>
     );
