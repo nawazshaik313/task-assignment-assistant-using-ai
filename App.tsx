@@ -115,14 +115,8 @@ const fetchData = async <T,>(endpoint: string, options: RequestInit = {}, defaul
     
     // If response is OK (200-299 range) but not 204
     if (!responseText) {
-      // For POST/PUT, a 200/201 response usually implies the resource (created/updated) should be in the body.
-      // If it's empty, this might be an API contract issue.
-      if (options.method === 'POST' || options.method === 'PUT') {
-        throw new Error(`Server responded with ${response.status} ${response.statusText} but an empty body for ${options.method || 'request'} to ${endpoint}. Expected resource in response.`);
-      }
-      // For other methods (GET, DELETE), or if method not specified, an empty body might be acceptable.
-      return defaultReturnVal !== null ? defaultReturnVal : ({} as T);
-    }
+return defaultReturnVal !== null ? defaultReturnVal : ({} as T);
+}
 
     return JSON.parse(responseText) as T;
   } catch (error) {
