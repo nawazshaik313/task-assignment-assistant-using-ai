@@ -400,12 +400,12 @@ export const App = (): JSX.Element => {
 
     try {
       
-const result = await fetchData<{ success: boolean; user: PendingUser }>('/pending-users', {
+const response = await fetchData<{ success: boolean; user: PendingUser }>('/pending-users', {
   method: 'POST',
   body: JSON.stringify(newPendingUserData),
 });
 
-const createdPendingUser = result?.user;
+const createdPendingUser = response?.user;
 
 
       if (createdPendingUser && createdPendingUser.id) { // Check for ID as a sign of successful creation
@@ -466,12 +466,12 @@ const createdPendingUser = result?.user;
 
     try {
       
-const result = await fetchData<{ success: boolean; user: PendingUser }>('/pending-users', {
+const response = await fetchData<{ success: boolean; user: PendingUser }>('/pending-users', {
   method: 'POST',
   body: JSON.stringify(newPendingUserData),
 });
 
-const createdPendingUser = result?.user;
+const createdPendingUser = response?.user;
 
 
       if (createdPendingUser && (createdPendingUser.id || createdPendingUser._id)) {
