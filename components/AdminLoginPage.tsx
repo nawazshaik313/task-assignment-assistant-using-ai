@@ -1,22 +1,50 @@
-
-import React from 'react';
+import React, { useState } from 'react';
 
 interface AdminLoginPageProps {
-  onLogin: () => void;
+  onLogin: (token: string) => void; // Expect token or login info
 }
 
 const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onLogin }) => {
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const [email, setEmail] = useState("admin@example.com");
+  const [password, setPassword] = useState("password");
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    // Basic validation or data handling can be added here
-    // For now, directly call onLogin as a placeholder
-    onLogin();
+    setError("");
+
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/admin/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ email, password })
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.token) {
+        onLogin(data.token); // Pass token to parent (or useContext, etc.)
+      } else {
+        setError(data.message || 'Login failed. Please try again.');
+      }
+    } catch (err) {
+      setError("Server error. Please try again later.");
+    }
   };
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-authPageBg p-4">
       <div className="bg-surface p-8 rounded-xl shadow-2xl w-full max-w-md">
         <h2 className="text-2xl font-bold text-textlight mb-6 text-center">Admin Login</h2>
+
+        {error && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-2 rounded mb-4">
+            {error}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label htmlFor="admin-email" className="block text-sm font-medium text-textlight">
@@ -24,13 +52,12 @@ const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onLogin }) => {
             </label>
             <input
               id="admin-email"
-              name="email"
               type="email"
-              autoComplete="email"
               required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               className="mt-1 block w-full px-3 py-2 bg-authFormBg border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm text-textlight placeholder-neutral"
               placeholder="admin@example.com"
-              defaultValue="admin@example.com" // Default for demo ease
             />
           </div>
 
@@ -40,13 +67,12 @@ const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onLogin }) => {
             </label>
             <input
               id="admin-password"
-              name="password"
               type="password"
-              autoComplete="current-password"
               required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
               className="mt-1 block w-full px-3 py-2 bg-authFormBg border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm text-textlight placeholder-neutral"
-              placeholder="password"
-              defaultValue="password" // Default for demo ease
+              placeholder="Enter password"
             />
           </div>
 
@@ -61,7 +87,7 @@ const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onLogin }) => {
         </form>
       </div>
       <footer className="text-center py-6 text-sm text-neutral mt-auto">
-          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by SHAIK MOHAMMED NAWAZ.</p>
+        <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by SHAIK MOHAMMED NAWAZ.</p>
       </footer>
     </div>
   );
