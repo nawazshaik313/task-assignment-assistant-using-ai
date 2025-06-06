@@ -399,10 +399,14 @@ export const App = (): JSX.Element => {
     };
 
     try {
-      const createdPendingUser = await fetchData<PendingUser>('/pending-users', {
-        method: 'POST',
-        body: JSON.stringify(newPendingUserData),
-      });
+      
+const result = await fetchData<{ success: boolean; user: PendingUser }>('/pending-users', {
+  method: 'POST',
+  body: JSON.stringify(newPendingUserData),
+});
+
+const createdPendingUser = result?.user;
+
 
       if (createdPendingUser && createdPendingUser.id) { // Check for ID as a sign of successful creation
         setPendingUsers(prev => [...prev, createdPendingUser]);
@@ -461,12 +465,16 @@ export const App = (): JSX.Element => {
     };
 
     try {
-      const createdPendingUser = await fetchData<PendingUser>('/pending-users', {
-        method: 'POST',
-        body: JSON.stringify(newPendingUserData),
-      });
+      
+const result = await fetchData<{ success: boolean; user: PendingUser }>('/pending-users', {
+  method: 'POST',
+  body: JSON.stringify(newPendingUserData),
+});
 
-      if (createdPendingUser && createdPendingUser.id) {
+const createdPendingUser = result?.user;
+
+
+      if (createdPendingUser && (createdPendingUser.id || createdPendingUser._id)) {
         setPendingUsers(prev => [...prev, createdPendingUser]);
         setSuccessMessage("Pre-registration submitted successfully! Your account is pending administrator approval. You will be notified via email.");
         setPreRegistrationForm(prev => ({ ...initialPreRegistrationFormState, referringAdminId: prev.referringAdminId, referringAdminDisplayName: prev.referringAdminDisplayName, isReferralLinkValid: prev.isReferralLinkValid }));
