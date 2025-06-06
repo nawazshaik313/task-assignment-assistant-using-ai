@@ -10,22 +10,19 @@ export default defineConfig(({ mode }) => {
     },
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, 'src'),
+        '@': path.resolve(__dirname, '.'),
       },
     },
     server: {
       host: '0.0.0.0',
       port: Number(process.env.PORT) || 5173,
-      allowedHosts: [
-        'task-assignment-assistant-using-ai.onrender.com', // ✅ your Render domain
-      ],
+
+      // ✅ Allow your Render domain explicitly
+      allowedHosts: ['task-assignment-assistant-using-ai.onrender.com']
     },
     preview: {
       host: '0.0.0.0',
-      port: Number(process.env.PORT) || 4173,
-      allowedHosts: [
-        'task-assignment-assistant-using-ai.onrender.com', // ✅ also add here
-      ],
-    },
+      port: Number(process.env.PORT) || 4173
+    }
   };
 });
