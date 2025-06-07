@@ -356,147 +356,185 @@ export const App = (): JSX.Element => {
     return users.find(u => u.role === 'admin'); 
   }, [users]);
 
+// Registration Handler
+const handleNewRegistration = async (e: React.FormEvent) => {
+  e.preventDefault();
+  clearMessages();
 
-  const handleNewRegistration = async (e: React.FormEvent) => {
-    e.preventDefault();
-    clearMessages();
-    const { name, email, password, confirmPassword, role: formRole } = newRegistrationForm;
+  const { name, email, password, confirmPassword, role: formRole } = newRegistrationForm;
 
-    if (!name.trim() || !email.trim() || !password.trim() || !confirmPassword.trim()) {
-      setError("All fields are required.");
-      return;
-    }
-    if (!/\S+@\S+\.\S+/.test(email)) {
-      setError("Please enter a valid email address.");
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError("Passwords do not match.");
-      return;
-    }
+  if (!name.trim() || !email.trim() || !password.trim() || !confirmPassword.trim()) {
+    setError("All fields are required.");
+    return;
+  }
 
-    const passwordValidationResult = validatePassword(password);
-    if (!passwordValidationResult.isValid) {
-      setError(passwordValidationResult.errors.join(' '));
-      return;
-    }
+  if (!/\S+@\S+\.\S+/.test(email)) {
+    setError("Please enter a valid email address.");
+    return;
+  }
 
-    // Client-side check (backend should also validate this)
-    if (users.some(u => u.email === email) || pendingUsers.some(pu => pu.email === email)) {
-      setError("This email address is already registered or pending approval. Please use a different email or contact an administrator if you believe this is an error.");
-      return;
-    }
-    
-    const actualRoleToRegister = users.length === 0 ? 'admin' : formRole;
-    
-    const newPendingUserData = {
-        displayName: name,
-        email: email,
-        password: password, 
-        role: actualRoleToRegister,
-        uniqueId: email, // Default uniqueId to email for general registration
-        submissionDate: new Date().toISOString(),
-    };
+  if (password !== confirmPassword) {
+    setError("Passwords do not match.");
+    return;
+  }
 
-    try {
-      
-const response = await fetchData<{ success: boolean; user: PendingUser }>('/pending-users', {
-  method: 'POST',
-  body: JSON.stringify(newPendingUserData),
-});
+  const passwordValidationResult = validatePassword(password);
+  if (!passwordValidationResult.isValid) {
+    setError(passwordValidationResult.errors.join(" "));
+    return;
+  }
 
-const createdPendingUser = response?.user;
+  if (users.some(u => u.email === email) || pendingUsers.some(pu => pu.email === email)) {
+    setError("This email is already registered or pending approval.");
+    return;
+  }
 
+  const actualRoleToRegister = users.length === 0 ? 'admin' : formRole;
 
-      if (createdPendingUser && createdPendingUser.id) { // Check for ID as a sign of successful creation
-        setPendingUsers(prev => [...prev, createdPendingUser]);
-        setSuccessMessage("Registration submitted successfully! Your account is pending administrator approval. You will be notified via email once it's active.");
-        setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user' }); 
-        
-        emailService.sendRegistrationPendingToUserEmail(createdPendingUser.email, createdPendingUser.displayName);
-        const adminToNotify = getAdminToNotify();
-        if (adminToNotify) {
-          emailService.sendNewPendingRegistrationToAdminEmail(adminToNotify.email, adminToNotify.displayName, createdPendingUser.displayName, createdPendingUser.email);
-        }
-      } else {
-        setError("Failed to submit registration. The server did not confirm creation or returned unexpected data.");
-      }
-    } catch (err: any) {
-       setError(err.message || "Failed to submit registration. Please check details or try again later.");
-    }
+  const newPendingUserData = {
+    displayName: name,
+    email,
+    password,
+    role: actualRoleToRegister,
+    uniqueId: email,
+    submissionDate: new Date().toISOString(),
   };
+
+  try {
+    const response = await fetchData<{ success: boolean; user: PendingUser }>('/pending-users', {
+      method: 'POST',
+      body: JSON.stringify(newPendingUserData),
+    });
+
+    const createdPendingUser = response?.user;
+    const normalizedId = createdPendingUser?._id || createdPendingUser?.id;
+
+    if (createdPendingUser && normalizedId) {
+      createdPendingUser.id = normalizedId;
+
+      setPendingUsers(prev => [...prev, createdPendingUser]);
+      setSuccessMessage("Registration submitted successfully! Your account is pending administrator approval.");
+      setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user' });
+
+      emailService.sendRegistrationPendingToUserEmail(createdPendingUser.email, createdPendingUser.displayName);
+
+      const adminToNotify = getAdminToNotify();
+      if (adminToNotify) {
+        emailService.sendNewPendingRegistrationToAdminEmail(
+          adminToNotify.email,
+          adminToNotify.displayName,
+          createdPendingUser.displayName,
+          createdPendingUser.email
+        );
+      }
+    } else {
+      setError("Failed to submit registration. The server did not confirm creation or returned unexpected data.");
+    }
+  } catch (err: any) {
+    setError(err.message || "Failed to submit registration. Please try again later.");
+  }
+};
+
   
-  const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    clearMessages();
-    const { uniqueId, displayName, email, password, confirmPassword, referringAdminId } = preRegistrationForm;
+// Pre-Registration Handler
+const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  clearMessages();
 
-    if (!uniqueId.trim() || !displayName.trim() || !email.trim() || !password.trim() || !confirmPassword.trim()) {
-      setError("All fields (System ID, Display Name, Email, Password, Confirm Password) are required.");
-      return;
-    }
-     if (!/\S+@\S+\.\S+/.test(email)) {
-      setError("Please enter a valid email address.");
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError("Passwords do not match.");
-      return;
-    }
-    const passwordValidationResult = validatePassword(password);
-    if (!passwordValidationResult.isValid) {
-      setError(passwordValidationResult.errors.join(' '));
-      return;
-    }
+  const { uniqueId, displayName, email, password, confirmPassword, referringAdminId } = preRegistrationForm;
 
-    if (users.some(u => u.uniqueId === uniqueId || u.email === email) || pendingUsers.some(pu => pu.uniqueId === uniqueId || pu.email === email)) {
-      setError("This System ID or Email is already registered or pending approval. Please choose a different one or contact an administrator.");
-      return;
-    }
+  if (!uniqueId.trim() || !displayName.trim() || !email.trim() || !password.trim() || !confirmPassword.trim()) {
+    setError("All fields (System ID, Display Name, Email, Password, Confirm Password) are required.");
+    return;
+  }
 
-    const newPendingUserData = {
-      uniqueId,
-      displayName,
-      email,
-      password, 
-      role: 'user', 
-      referringAdminId: referringAdminId || undefined,
-      submissionDate: new Date().toISOString(), 
-    };
+  if (!/\S+@\S+\.\S+/.test(email)) {
+    setError("Please enter a valid email address.");
+    return;
+  }
 
-    try {
-      
-const response = await fetchData<{ success: boolean; user: PendingUser }>('/pending-users', {
-  method: 'POST',
-  body: JSON.stringify(newPendingUserData),
-});
+  if (password !== confirmPassword) {
+    setError("Passwords do not match.");
+    return;
+  }
 
-const createdPendingUser = response?.user;
+  const passwordValidationResult = validatePassword(password);
+  if (!passwordValidationResult.isValid) {
+    setError(passwordValidationResult.errors.join(" "));
+    return;
+  }
 
+  if (
+    users.some(u => u.uniqueId === uniqueId || u.email === email) ||
+    pendingUsers.some(pu => pu.uniqueId === uniqueId || pu.email === email)
+  ) {
+    setError("This System ID or Email is already registered or pending approval. Please choose a different one or contact an administrator.");
+    return;
+  }
 
-      if (createdPendingUser && (createdPendingUser.id || createdPendingUser._id)) {
-        setPendingUsers(prev => [...prev, createdPendingUser]);
-        setSuccessMessage("Pre-registration submitted successfully! Your account is pending administrator approval. You will be notified via email.");
-        setPreRegistrationForm(prev => ({ ...initialPreRegistrationFormState, referringAdminId: prev.referringAdminId, referringAdminDisplayName: prev.referringAdminDisplayName, isReferralLinkValid: prev.isReferralLinkValid }));
-        
-        const referringAdmin = users.find(u => u.id === referringAdminId);
-        emailService.sendPreRegistrationSubmittedToUserEmail(createdPendingUser.email, createdPendingUser.displayName, referringAdmin?.displayName || 'the administrator');
-
-        if (referringAdmin) {
-          emailService.sendPreRegistrationNotificationToAdminEmail(referringAdmin.email, referringAdmin.displayName, createdPendingUser.displayName, createdPendingUser.uniqueId);
-        } else {
-            const generalAdmin = getAdminToNotify();
-            if(generalAdmin) {
-              emailService.sendPreRegistrationNotificationToAdminEmail(generalAdmin.email, generalAdmin.displayName, createdPendingUser.displayName, createdPendingUser.uniqueId);
-            }
-        }
-      } else {
-         setError("Failed to submit pre-registration. Server did not confirm creation or returned unexpected data.");
-      }
-    } catch (err: any) {
-      setError(err.message || "Failed to submit pre-registration. Please try again later.");
-    }
+  const newPendingUserData = {
+    uniqueId,
+    displayName,
+    email,
+    password,
+    role: 'user',
+    referringAdminId: referringAdminId || undefined,
+    submissionDate: new Date().toISOString(),
   };
+
+  try {
+    const response = await fetchData<{ success: boolean; user: PendingUser }>('/pending-users', {
+      method: 'POST',
+      body: JSON.stringify(newPendingUserData),
+    });
+
+    const createdPendingUser = response?.user;
+    const normalizedId = createdPendingUser?._id || createdPendingUser?.id;
+
+    if (createdPendingUser && normalizedId) {
+      createdPendingUser.id = normalizedId;
+
+      setPendingUsers(prev => [...prev, createdPendingUser]);
+      setSuccessMessage("Pre-registration submitted successfully! Your account is pending administrator approval. You will be notified via email.");
+      setPreRegistrationForm(prev => ({
+        ...initialPreRegistrationFormState,
+        referringAdminId: prev.referringAdminId,
+        referringAdminDisplayName: prev.referringAdminDisplayName,
+        isReferralLinkValid: prev.isReferralLinkValid
+      }));
+
+      const referringAdmin = users.find(u => u.id === referringAdminId);
+      emailService.sendPreRegistrationSubmittedToUserEmail(
+        createdPendingUser.email,
+        createdPendingUser.displayName,
+        referringAdmin?.displayName || 'the administrator'
+      );
+
+      if (referringAdmin) {
+        emailService.sendPreRegistrationNotificationToAdminEmail(
+          referringAdmin.email,
+          referringAdmin.displayName,
+          createdPendingUser.displayName,
+          createdPendingUser.uniqueId
+        );
+      } else {
+        const generalAdmin = getAdminToNotify();
+        if (generalAdmin) {
+          emailService.sendPreRegistrationNotificationToAdminEmail(
+            generalAdmin.email,
+            generalAdmin.displayName,
+            createdPendingUser.displayName,
+            createdPendingUser.uniqueId
+          );
+        }
+      }
+    } else {
+      setError("Failed to submit pre-registration. Server did not confirm creation or returned unexpected data.");
+    }
+  } catch (err: any) {
+    setError(err.message || "Failed to submit pre-registration. Please try again later.");
+  }
+};
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -28,15 +28,16 @@ export interface User {
 }
 
 export interface PendingUser {
-  id: string;
-  uniqueId: string; 
-  displayName:string;
-  email: string; 
-  password: string; 
-  role: Role; // Intended role from registration
-  submissionDate: string;
-  referringAdminId?: string; // Optional: ID of admin who generated pre-reg link, or system if general reg.
+  _id?: string;
+  id?: string; // ✅ Add this if missing
+  email: string;
+  displayName: string;
+  password?: string;
+  role: string;
+  uniqueId: string;
+  submissionDate?: string;
 }
+
 
 export interface Program {
   id: string;
