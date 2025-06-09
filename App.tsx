@@ -1483,16 +1483,16 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
               { 
                 <div>
                   <label htmlFor="regRole" className="block text-sm font-medium text-textlight">Role</label>
-                  <AuthFormSelect
-                    id="regRole"
-                    aria-label="Role for registration"
-                    value={users.length === 0 ? 'admin' : newRegistrationForm.role}
-                    onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, role: e.target.value as Role })}
-                    disabled={users.length === 0} 
-                  >
-                    <option value="user">User</option>
-                    {users.length === 0 && <option value="admin">Admin (First User)</option>}
-                  </AuthFormSelect>
+                  <input
+  type="text"
+  value={users.length === 0 ? "Admin (Auto-assigned)" : "User"}
+  disabled
+  className="mt-1 block w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-md shadow-sm"
+/>
+<small className="text-xs text-gray-500">
+  Role will be automatically assigned.
+</small>
+
                   <p className="mt-1 text-xs text-neutral">
                     {users.length === 0 ? "First user will be registered as Admin." : "General registration is for 'User' role."}
                   </p>
