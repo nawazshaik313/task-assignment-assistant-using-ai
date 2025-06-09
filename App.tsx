@@ -413,7 +413,11 @@ const handleNewRegistration = async (e: React.FormEvent) => {
       createdPendingUser.id = normalizedId;
 
       setPendingUsers(prev => [...prev, createdPendingUser]);
-      setSuccessMessage("Registration submitted successfully! Your account is pending administrator approval.");
+      if (actualRoleToRegister === 'admin' && users.length === 0) {
+  setSuccessMessage("Admin registered successfully! You can now log in.");
+} else {
+  setSuccessMessage("Registration submitted successfully! Your account is pending administrator approval.");
+}
       setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user' });
 
       emailService.sendRegistrationPendingToUserEmail(createdPendingUser.email, createdPendingUser.displayName);

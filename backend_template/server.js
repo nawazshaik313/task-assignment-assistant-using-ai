@@ -1,8 +1,11 @@
-const express = require("express");
-const mongoose = require("mongoose");
-const cors = require("cors");
-const bcrypt = require("bcryptjs");
-require("dotenv").config();
+const express = require('express');
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+const cors = require('cors');
+require('dotenv').config();
+
+
+const User = require('./models/User'); // ✅ Add this line
 
 const app = express();
 app.use(cors());
@@ -33,13 +36,37 @@ app.post('/pending-users', async (req, res) => {
   }
 
   try {
-    const existing = await PendingUser.findOne({ $or: [{ email }, { uniqueId }] });
-    if (existing) {
+    // Check if email or uniqueId already exists in users or pending users
+    const existingUser = await User.findOne({ email });
+    const existingPending = await PendingUser.findOne({ $or: [{ email }, { uniqueId }] });
+
+    if (existingUser || existingPending) {
       return res.status(409).json({ success: false, error: 'Email or Unique ID already exists' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    // ✅ Check if this is the first user (admin)
+    const userCount = await User.countDocuments();
+    if (userCount === 0 && role === 'admin') {
+      const newAdmin = new User({
+        displayName,
+        email,
+        password: hashedPassword,
+        role,
+        uniqueId
+      });
+
+      await newAdmin.save();
+
+      return res.status(201).json({
+        success: true,
+        message: "Admin registered successfully",
+        user: newAdmin
+      });
+    }
+
+    // Otherwise register as pending user
     const newPendingUser = new PendingUser({
       displayName,
       email,
@@ -57,10 +84,12 @@ app.post('/pending-users', async (req, res) => {
     });
 
   } catch (err) {
-    console.error("❌ Error saving pending user:", err);
-    res.status(500).json({ success: false, error: "Server error while registering." });
-  }
+  console.error("❌ Error saving user:", err.message || err);
+  res.status(500).json({ success: false, error: err.message || "Server error while registering." });
+}
+
 });
+
 
 // Test route
 app.get('/', (req, res) => {
