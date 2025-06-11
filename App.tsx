@@ -195,37 +195,64 @@ export const App = (): JSX.Element => {
       try {
         // Attempt to get current user first (e.g., from a session cookie)
         // Backend should return 401 or similar if not logged in, fetchData should handle this.
-        const sessionUser = await fetchData<User>('/users/current', {}, null);
-        if (sessionUser) {
-          setCurrentUser(sessionUser);
+        const sessionUserResponse = await fetchData<User & { _id?: string }>('/users/current', {}, null);
+        let sessionUser: User | null = null;
+        if (sessionUserResponse) {
+            const userId = sessionUserResponse._id || sessionUserResponse.id;
+            if (userId) {
+                sessionUser = { ...sessionUserResponse, id: userId, password: '' }; // Ensure ID and clear password
+                if ((sessionUser as any)._id) delete (sessionUser as any)._id;
+                setCurrentUser(sessionUser);
+            }
         }
+
 
         // Fetch all other data. If any of these fail with 404, fetchData returns empty array or null.
         const [
-          loadedUsers,
-          loadedPendingUsers,
-          loadedTasks,
-          loadedPrograms,
-          loadedAssignments,
-          loadedAdminLogs,
+          loadedUsersResponse,
+          loadedPendingUsersResponse,
+          loadedTasksResponse,
+          loadedProgramsResponse,
+          loadedAssignmentsResponse,
+          loadedAdminLogsResponse,
         ] = await Promise.all([
-          fetchData<User[]>('/users', {}, []),
-          fetchData<PendingUser[]>('/pending-users', {}, []),
-          fetchData<Task[]>('/tasks', {}, []),
-          fetchData<Program[]>('/programs', {}, []),
-          fetchData<Assignment[]>('/assignments', {}, []),
-          fetchData<AdminLogEntry[]>('/admin-logs', {}, []),
+          fetchData<(User & { _id?: string })[]>('/users', {}, []),
+          fetchData<(PendingUser & { _id?: string })[]>('/pending-users', {}, []),
+          fetchData<(Task & { _id?: string })[]>('/tasks', {}, []),
+          fetchData<(Program & { _id?: string })[]>('/programs', {}, []),
+          fetchData<(Assignment & { _id?: string })[]>('/assignments', {}, []), // Assignments might not have their own _id from MongoDB if they are subdocuments or identified by composite keys. Adjust if needed.
+          fetchData<(AdminLogEntry & { _id?: string })[]>('/admin-logs', {}, []),
         ]);
 
-        setUsers(loadedUsers || []);
-        setPendingUsers(loadedPendingUsers || []);
-        setTasks(loadedTasks || []);
-        setPrograms(loadedPrograms || []);
-        setAssignments(loadedAssignments || []);
-        setAdminLogs(loadedAdminLogs || []);
+        const normalizeId = <T extends { id: string; _id?: string }>(item: T): T => {
+            if (item._id && !item.id) item.id = item._id;
+            delete item._id;
+            if ('password' in item) (item as User).password = ''; // Clear password for users
+            return item;
+        };
         
-        // Update newRegistrationForm.role if this is the first load and no users exist
-        if ((loadedUsers || []).length === 0) {
+        const normalizeArray = <T extends { id: string; _id?: string }>(arr: T[] | null): T[] => {
+            return (arr || []).map(item => normalizeId(item));
+        };
+
+        const loadedUsers = normalizeArray(loadedUsersResponse as (User & { _id?: string })[]);
+        const loadedPendingUsers = normalizeArray(loadedPendingUsersResponse as (PendingUser & { _id?: string })[]);
+        const loadedTasks = normalizeArray(loadedTasksResponse as (Task & { _id?: string })[]);
+        const loadedPrograms = normalizeArray(loadedProgramsResponse as (Program & { _id?: string })[]);
+        // Assignments might use taskId and personId as composite key, or have their own ID.
+        // Assuming they follow the _id pattern if they are top-level documents.
+        const loadedAssignments = normalizeArray(loadedAssignmentsResponse as (Assignment & { _id?: string })[]); 
+        const loadedAdminLogs = normalizeArray(loadedAdminLogsResponse as (AdminLogEntry & { _id?: string })[]);
+
+
+        setUsers(loadedUsers);
+        setPendingUsers(loadedPendingUsers);
+        setTasks(loadedTasks);
+        setPrograms(loadedPrograms);
+        setAssignments(loadedAssignments);
+        setAdminLogs(loadedAdminLogs);
+        
+        if (loadedUsers.length === 0) {
             setNewRegistrationForm(prev => ({ ...prev, role: 'admin' }));
         } else {
             setNewRegistrationForm(prev => ({ ...prev, role: 'user' }));
@@ -235,7 +262,6 @@ export const App = (): JSX.Element => {
       } catch (err: any) {
         console.error("Critical error during initial data load from backend:", err);
         setError("Failed to load initial application data from the server. Error: " + err.message + ". Please ensure the backend is running and accessible.");
-         // Set empty arrays for data if critical load fails to prevent further errors
         setUsers([]);
         setPendingUsers([]);
         setTasks([]);
@@ -270,8 +296,6 @@ export const App = (): JSX.Element => {
       if (targetPageFromHashPath === Page.PreRegistration) {
         const refAdminIdFromHash = params.get('refAdminId');
         if (refAdminIdFromHash) {
-          // We might not have all users loaded yet to find admin display name,
-          // Backend could provide this if link was opaque, or we just show ID.
           const adminUser = users.find(u => u.id === refAdminIdFromHash && u.role === 'admin');
           setPreRegistrationForm(prev => ({
             ...initialPreRegistrationFormState, 
@@ -312,7 +336,6 @@ export const App = (): JSX.Element => {
 
       if (currentUser && currentUser.role === 'user' && !localStorage.getItem(`hasCompletedUserTour_${currentUser.id}`)) {
          setTimeout(() => {
-            // Check currentPage again because it might have changed due to async navigation
             const finalCurrentPage = window.location.hash.substring(1).split('?')[0].toUpperCase() as Page | string;
             if (finalCurrentPage !== Page.Login.toUpperCase() && finalCurrentPage !== Page.PreRegistration.toUpperCase() && Object.values(Page).includes(finalCurrentPage as Page)) { 
                 setShowUserTour(true);
@@ -367,23 +390,19 @@ const handleNewRegistration = async (e: React.FormEvent) => {
     setError("All fields are required.");
     return;
   }
-
   if (!/\S+@\S+\.\S+/.test(email)) {
     setError("Please enter a valid email address.");
     return;
   }
-
   if (password !== confirmPassword) {
     setError("Passwords do not match.");
     return;
   }
-
   const passwordValidationResult = validatePassword(password);
   if (!passwordValidationResult.isValid) {
     setError(passwordValidationResult.errors.join(" "));
     return;
   }
-
   if (users.some(u => u.email === email) || pendingUsers.some(pu => pu.email === email)) {
     setError("This email is already registered or pending approval.");
     return;
@@ -391,51 +410,131 @@ const handleNewRegistration = async (e: React.FormEvent) => {
 
   const actualRoleToRegister = users.length === 0 ? 'admin' : formRole;
 
-  const newPendingUserData = {
-    displayName: name,
-    email,
-    password,
-    role: actualRoleToRegister,
-    uniqueId: email,
-    submissionDate: new Date().toISOString(),
-  };
+  if (users.length === 0 && actualRoleToRegister === 'admin') {
+    // First admin auto-approval and login
+    const newAdminData: Omit<User, 'id' | 'referringAdminId'> = {
+      displayName: name,
+      email,
+      password, // Password sent for creation
+      role: 'admin',
+      uniqueId: email, // Default uniqueId to email
+      position: 'Administrator', // Default position
+      userInterests: '',
+      phone: '',
+      notificationPreference: 'email',
+    };
 
-  try {
-    const response = await fetchData<{ success: boolean; user: PendingUser }>('/pending-users', {
-      method: 'POST',
-      body: JSON.stringify(newPendingUserData),
-    });
+    try {
+      setIsLoadingAppData(true); // Indicate loading during admin creation & data refetch
+      const createdAdminResponse = await fetchData<User & { _id?: string }>('/users', {
+        method: 'POST',
+        body: JSON.stringify(newAdminData),
+      });
 
-    const createdPendingUser = response?.user;
-    const normalizedId = createdPendingUser?._id || createdPendingUser?.id;
+      if (createdAdminResponse) {
+        const adminId = createdAdminResponse._id || createdAdminResponse.id;
+        if (adminId) {
+          const adminForState: User = {
+            ...createdAdminResponse,
+            id: adminId,
+            password: '', // Clear password for client state
+          };
+          if ((adminForState as any)._id) delete (adminForState as any)._id;
 
-    if (createdPendingUser && normalizedId) {
-      createdPendingUser.id = normalizedId;
+          // setCurrentUser and setUsers before re-fetching might be more responsive
+          setCurrentUser(adminForState);
+          setUsers(prev => [...prev, adminForState]);
+          
+          setSuccessMessage("Admin account registered and logged in! You can now set up the system.");
+          setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user' });
+          emailService.sendWelcomeRegistrationEmail(adminForState.email, adminForState.displayName, adminForState.role);
+          
+          // Re-fetch all data to ensure consistency after first admin creation
+          const [ updatedUsers, updatedPendingUsers, updatedTasks, updatedPrograms, updatedAssignments, updatedAdminLogs] = await Promise.all([
+            fetchData<(User & { _id?: string })[]>('/users', {}, []),
+            fetchData<(PendingUser & { _id?: string })[]>('/pending-users', {}, []),
+            fetchData<(Task & { _id?: string })[]>('/tasks', {}, []),
+            fetchData<(Program & { _id?: string })[]>('/programs', {}, []),
+            fetchData<(Assignment & { _id?: string })[]>('/assignments', {}, []),
+            fetchData<(AdminLogEntry & { _id?: string })[]>('/admin-logs', {}, []),
+          ]);
 
-      setPendingUsers(prev => [...prev, createdPendingUser]);
-      if (actualRoleToRegister === 'admin' && users.length === 0) {
-  setSuccessMessage("Admin registered successfully! You can now log in.");
-} else {
-  setSuccessMessage("Registration submitted successfully! Your account is pending administrator approval.");
-}
-      setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user' });
+          const normalizeId = <T extends { id: string; _id?: string }>(item: T): T => {
+              if (item._id && !item.id) item.id = item._id;
+              delete item._id;
+              if ('password' in item) (item as User).password = '';
+              return item;
+          };
+          const normalizeArray = <T extends { id: string; _id?: string }>(arr: T[] | null): T[] => (arr || []).map(item => normalizeId(item));
+          
+          setUsers(normalizeArray(updatedUsers as (User & { _id?: string })[]));
+          setPendingUsers(normalizeArray(updatedPendingUsers as (PendingUser & { _id?: string })[]));
+          setTasks(normalizeArray(updatedTasks as (Task & { _id?: string })[]));
+          setPrograms(normalizeArray(updatedPrograms as (Program & { _id?: string })[]));
+          setAssignments(normalizeArray(updatedAssignments as (Assignment & { _id?: string })[]));
+          setAdminLogs(normalizeArray(updatedAdminLogs as (AdminLogEntry & { _id?: string })[]));
+          
+          navigateTo(Page.Dashboard); // Navigate after data is re-fetched and states are set
 
-      emailService.sendRegistrationPendingToUserEmail(createdPendingUser.email, createdPendingUser.displayName);
-
-      const adminToNotify = getAdminToNotify();
-      if (adminToNotify) {
-        emailService.sendNewPendingRegistrationToAdminEmail(
-          adminToNotify.email,
-          adminToNotify.displayName,
-          createdPendingUser.displayName,
-          createdPendingUser.email
-        );
+        } else {
+          setError("Failed to create admin user. Server response missing ID.");
+        }
+      } else {
+        setError("Failed to create admin user. Server did not confirm creation or returned unexpected data.");
       }
-    } else {
-      setError("Failed to submit registration. The server did not confirm creation or returned unexpected data.");
+    } catch (err: any) {
+      setError(err.message || "Failed to create admin user. Please try again later.");
+    } finally {
+        setIsLoadingAppData(false);
     }
-  } catch (err: any) {
-    setError(err.message || "Failed to submit registration. Please try again later.");
+  } else {
+    // Existing logic for pending users
+    const newPendingUserData = {
+      displayName: name,
+      email,
+      password, // Password sent for pending user creation
+      role: actualRoleToRegister,
+      uniqueId: email,
+      submissionDate: new Date().toISOString(),
+    };
+
+    try {
+      const response = await fetchData<{ success?: boolean; user: PendingUser & { _id?: string } }>('/pending-users', {
+        method: 'POST',
+        body: JSON.stringify(newPendingUserData),
+      });
+
+      const createdPendingUser = response?.user;
+      const normalizedId = createdPendingUser?._id || createdPendingUser?.id;
+
+      if (createdPendingUser && normalizedId) {
+        createdPendingUser.id = normalizedId;
+        if ((createdPendingUser as any)._id) delete (createdPendingUser as any)._id;
+
+        setPendingUsers(prev => [...prev, createdPendingUser]);
+        if (actualRoleToRegister === 'admin') {
+            setSuccessMessage("Admin registration submitted. It requires approval from an existing administrator as the system is already set up.");
+        } else {
+            setSuccessMessage("Registration submitted successfully! Your account is pending administrator approval.");
+        }
+        setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user' });
+
+        emailService.sendRegistrationPendingToUserEmail(createdPendingUser.email, createdPendingUser.displayName);
+        const adminToNotify = getAdminToNotify();
+        if (adminToNotify) {
+          emailService.sendNewPendingRegistrationToAdminEmail(
+            adminToNotify.email,
+            adminToNotify.displayName,
+            createdPendingUser.displayName,
+            createdPendingUser.email
+          );
+        }
+      } else {
+        setError("Failed to submit registration. The server did not confirm creation or returned unexpected data. Response: " + JSON.stringify(response));
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to submit registration. Please try again later.");
+    }
   }
 };
 
@@ -476,18 +575,18 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     return;
   }
 
-  const newPendingUserData = {
+  const newPendingUserData: Omit<PendingUser, 'id'> = { // id will be assigned by backend
     uniqueId,
     displayName,
     email,
-    password,
-    role: 'user',
+    password, // Send password
+    role: 'user', // Pre-registration is always for 'user' role
     referringAdminId: referringAdminId || undefined,
     submissionDate: new Date().toISOString(),
   };
 
   try {
-    const response = await fetchData<{ success: boolean; user: PendingUser }>('/pending-users', {
+    const response = await fetchData<{ success?: boolean; user: PendingUser & { _id?: string } }>('/pending-users', {
       method: 'POST',
       body: JSON.stringify(newPendingUserData),
     });
@@ -497,6 +596,8 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
     if (createdPendingUser && normalizedId) {
       createdPendingUser.id = normalizedId;
+       if ((createdPendingUser as any)._id) delete (createdPendingUser as any)._id;
+
 
       setPendingUsers(prev => [...prev, createdPendingUser]);
       setSuccessMessage("Pre-registration submitted successfully! Your account is pending administrator approval. You will be notified via email.");
@@ -533,7 +634,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         }
       }
     } else {
-      setError("Failed to submit pre-registration. Server did not confirm creation or returned unexpected data.");
+      setError("Failed to submit pre-registration. Server did not confirm creation or returned unexpected data. Response: " + JSON.stringify(response));
     }
   } catch (err: any) {
     setError(err.message || "Failed to submit pre-registration. Please try again later.");
@@ -555,65 +656,77 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     }
 
     try {
-      const loggedInUser = await fetchData<User>('/users/login', {
+      setIsLoadingAppData(true);
+      const loggedInUserResponse = await fetchData<User & { _id?: string }>('/users/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       });
 
-      if (loggedInUser && loggedInUser.id) {
-        setCurrentUser(loggedInUser);
+      if (loggedInUserResponse) {
+        const userId = loggedInUserResponse._id || loggedInUserResponse.id;
+        if (userId) {
+            const loggedInUser : User = { ...loggedInUserResponse, id: userId, password: ''}; // Ensure ID and clear password
+            if ((loggedInUser as any)._id) delete (loggedInUser as any)._id;
+            setCurrentUser(loggedInUser);
         
-        // Re-fetch all data after login for consistency
-        setIsLoadingAppData(true);
-        const [ updatedUsers, updatedPendingUsers, updatedTasks, updatedPrograms, updatedAssignments, updatedAdminLogs] = await Promise.all([
-          fetchData<User[]>('/users', {}, []),
-          fetchData<PendingUser[]>('/pending-users', {}, []),
-          fetchData<Task[]>('/tasks', {}, []),
-          fetchData<Program[]>('/programs', {}, []),
-          fetchData<Assignment[]>('/assignments', {}, []),
-          fetchData<AdminLogEntry[]>('/admin-logs', {}, []),
-        ]);
-        setUsers(updatedUsers || []);
-        setPendingUsers(updatedPendingUsers || []);
-        setTasks(updatedTasks || []);
-        setPrograms(updatedPrograms || []);
-        setAssignments(updatedAssignments || []);
-        setAdminLogs(updatedAdminLogs || []);
-        
-        if ((updatedUsers || []).length === 0 && loggedInUser.role !== 'admin') {
-             // This should ideally not happen if login implies user exists.
-             // But as a safeguard for the role logic if it's the first user somehow.
-            setNewRegistrationForm(prev => ({ ...prev, role: 'admin' }));
-        } else if ((updatedUsers || []).length > 0 && newRegistrationForm.role === 'admin') {
-            setNewRegistrationForm(prev => ({ ...prev, role: 'user' }));
-        }
+            const [ updatedUsersResponse, updatedPendingUsersResponse, updatedTasksResponse, updatedProgramsResponse, updatedAssignmentsResponse, updatedAdminLogsResponse] = await Promise.all([
+              fetchData<(User & { _id?: string })[]>('/users', {}, []),
+              fetchData<(PendingUser & { _id?: string })[]>('/pending-users', {}, []),
+              fetchData<(Task & { _id?: string })[]>('/tasks', {}, []),
+              fetchData<(Program & { _id?: string })[]>('/programs', {}, []),
+              fetchData<(Assignment & { _id?: string })[]>('/assignments', {}, []),
+              fetchData<(AdminLogEntry & { _id?: string })[]>('/admin-logs', {}, []),
+            ]);
 
-        setIsLoadingAppData(false);
+            const normalizeId = <T extends { id: string; _id?: string }>(item: T): T => {
+                if (item._id && !item.id) item.id = item._id;
+                delete item._id;
+                 if ('password' in item) (item as User).password = '';
+                return item;
+            };
+            const normalizeArray = <T extends { id: string; _id?: string }>(arr: T[] | null): T[] => (arr || []).map(item => normalizeId(item));
 
-        setSuccessMessage(`Welcome back, ${loggedInUser.displayName}!`);
-        setNewLoginForm({ email: '', password: '' }); 
+            setUsers(normalizeArray(updatedUsersResponse as (User & { _id?: string })[]));
+            setPendingUsers(normalizeArray(updatedPendingUsersResponse as (PendingUser & { _id?: string })[]));
+            setTasks(normalizeArray(updatedTasksResponse as (Task & { _id?: string })[]));
+            setPrograms(normalizeArray(updatedProgramsResponse as (Program & { _id?: string })[]));
+            setAssignments(normalizeArray(updatedAssignmentsResponse as (Assignment & { _id?: string })[]));
+            setAdminLogs(normalizeArray(updatedAdminLogsResponse as (AdminLogEntry & { _id?: string })[]));
+            
+            if ((updatedUsersResponse || []).length === 0 && loggedInUser.role !== 'admin') {
+                setNewRegistrationForm(prev => ({ ...prev, role: 'admin' }));
+            } else if ((updatedUsersResponse || []).length > 0 && newRegistrationForm.role === 'admin') {
+                setNewRegistrationForm(prev => ({ ...prev, role: 'user' }));
+            }
 
-        const targetPage = loggedInUser.role === 'admin' ? Page.Dashboard : Page.ViewAssignments;
-        navigateTo(targetPage);
-        
-        if (loggedInUser.role === 'user' && !localStorage.getItem(`hasCompletedUserTour_${loggedInUser.id}`)) {
-          setShowUserTour(true);
+            setSuccessMessage(`Welcome back, ${loggedInUser.displayName}!`);
+            setNewLoginForm({ email: '', password: '' }); 
+
+            const targetPage = loggedInUser.role === 'admin' ? Page.Dashboard : Page.ViewAssignments;
+            navigateTo(targetPage);
+            
+            if (loggedInUser.role === 'user' && !localStorage.getItem(`hasCompletedUserTour_${loggedInUser.id}`)) {
+              setShowUserTour(true);
+            }
+        } else {
+             setError("Invalid email or password, or login failed on server (missing ID).");
         }
       } else {
         setError("Invalid email or password, or login failed on server.");
       }
     } catch (err: any) {
       setError(err.message || "Login failed. Please check your credentials or server status.");
+    } finally {
+        setIsLoadingAppData(false);
     }
   };
 
   const handleLogout = async () => {
     clearMessages();
     try {
-      await fetchData('/users/logout', { method: 'POST' }); // Backend handles session invalidation
+      await fetchData('/users/logout', { method: 'POST' }); 
     } catch (err: any) {
       console.warn("Logout API call failed (user will be logged out client-side anyway):", err.message);
-      // Potentially inform user if logout API fails but still proceed with client-side logout
     }
     setCurrentUser(null); 
     setUsers([]); 
@@ -623,7 +736,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     setAssignments([]);
     setAdminLogs([]);
     setSuccessMessage("You have been logged out successfully.");
-    setNewRegistrationForm(prev => ({ ...prev, role: 'user' })); // Reset for next potential registration
+    setNewRegistrationForm(prev => ({ ...prev, role: 'user' })); 
     navigateTo(Page.Login);
   };
 
@@ -639,7 +752,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         return;
     }
     
-    // Client-side check (backend should also validate)
     if (users.some(u => u.uniqueId === uniqueId && u.id !== currentUser.id)) {
         setError("This System ID is already taken. Please choose another.");
         return;
@@ -664,21 +776,29 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
             setError(passwordValidationResult.errors.join(" "));
             return;
         }
-        updatePayload.password = password; // Send new password
+        updatePayload.password = password; 
     }
     
     try {
-      const updatedUserFromServer = await fetchData<User>(`/users/${currentUser.id}`, {
+      const updatedUserFromServerResponse = await fetchData<User & { _id?: string }>(`/users/${currentUser.id}`, {
         method: 'PUT',
         body: JSON.stringify(updatePayload),
       });
 
-      if (updatedUserFromServer && updatedUserFromServer.id) {
-        setUsers(users.map(u => u.id === currentUser.id ? updatedUserFromServer : u));
-        setCurrentUser(updatedUserFromServer); 
-        setSuccessMessage("Profile updated successfully!");
-        setUserForm(prev => ({ ...prev, password: '', confirmPassword: '' })); 
-        await addAdminLogEntry(`User profile updated for ${updatedUserFromServer.displayName} (ID: ${updatedUserFromServer.uniqueId}).`);
+      if (updatedUserFromServerResponse) {
+        const userId = updatedUserFromServerResponse._id || updatedUserFromServerResponse.id;
+        if (userId) {
+            const updatedUserFromServer: User = {...updatedUserFromServerResponse, id: userId, password: ''};
+            if((updatedUserFromServer as any)._id) delete (updatedUserFromServer as any)._id;
+
+            setUsers(users.map(u => u.id === currentUser.id ? updatedUserFromServer : u));
+            setCurrentUser(updatedUserFromServer); 
+            setSuccessMessage("Profile updated successfully!");
+            setUserForm(prev => ({ ...prev, password: '', confirmPassword: '' })); 
+            await addAdminLogEntry(`User profile updated for ${updatedUserFromServer.displayName} (ID: ${updatedUserFromServer.uniqueId}).`);
+        } else {
+             setError("Failed to update profile. Server response missing ID.");
+        }
       } else {
         setError("Failed to update profile. Server did not confirm update or returned unexpected data.");
       }
@@ -737,21 +857,29 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     }
 
     try {
-      const updatedUserFromServer = await fetchData<User>(`/users/${editingUserId}`, {
+      const updatedUserFromServerResponse = await fetchData<User & { _id?: string }>(`/users/${editingUserId}`, {
         method: 'PUT',
         body: JSON.stringify(updatePayload),
       });
       
-      if (updatedUserFromServer && updatedUserFromServer.id) {
-        setUsers(users.map(u => u.id === editingUserId ? updatedUserFromServer : u));
-        if(currentUser && currentUser.id === editingUserId) { 
-            setCurrentUser(updatedUserFromServer);
-        }
-        setSuccessMessage(`User ${updatedUserFromServer.displayName} updated successfully!`);
-        setEditingUserId(null);
-        setUserForm(initialUserFormData); 
-        await addAdminLogEntry(`Admin updated user profile for ${updatedUserFromServer.displayName} (ID: ${updatedUserFromServer.uniqueId}). Role set to ${role}.`);
-        navigateTo(Page.UserManagement);
+      if (updatedUserFromServerResponse) {
+         const userId = updatedUserFromServerResponse._id || updatedUserFromServerResponse.id;
+         if(userId){
+            const updatedUserFromServer: User = {...updatedUserFromServerResponse, id: userId, password: ''};
+            if((updatedUserFromServer as any)._id) delete (updatedUserFromServer as any)._id;
+
+            setUsers(users.map(u => u.id === editingUserId ? updatedUserFromServer : u));
+            if(currentUser && currentUser.id === editingUserId) { 
+                setCurrentUser(updatedUserFromServer);
+            }
+            setSuccessMessage(`User ${updatedUserFromServer.displayName} updated successfully!`);
+            setEditingUserId(null);
+            setUserForm(initialUserFormData); 
+            await addAdminLogEntry(`Admin updated user profile for ${updatedUserFromServer.displayName} (ID: ${updatedUserFromServer.uniqueId}). Role set to ${role}.`);
+            navigateTo(Page.UserManagement);
+         } else {
+            setError("Failed to update user. Server response missing ID.");
+         }
       } else {
         setError("Failed to update user. Server did not confirm update or returned unexpected data.");
       }
@@ -801,18 +929,26 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     };
 
     try {
-      const createdUser = await fetchData<User>('/users', {
+      const createdUserResponse = await fetchData<User & { _id?: string }>('/users', {
         method: 'POST',
         body: JSON.stringify(newUserData),
       });
 
-      if (createdUser && createdUser.id) {
-        setUsers(prev => [...prev, createdUser]);
-        setSuccessMessage(`User ${createdUser.displayName} created successfully!`);
-        setUserForm(initialUserFormData); 
-        emailService.sendWelcomeRegistrationEmail(createdUser.email, createdUser.displayName, createdUser.role);
-        await addAdminLogEntry(`Admin created new user: ${createdUser.displayName} (ID: ${createdUser.uniqueId}), Role: ${createdUser.role}.`);
-        navigateTo(Page.UserManagement);
+      if (createdUserResponse) {
+        const userId = createdUserResponse._id || createdUserResponse.id;
+        if(userId){
+            const createdUser: User = {...createdUserResponse, id: userId, password: ''};
+            if((createdUser as any)._id) delete (createdUser as any)._id;
+            
+            setUsers(prev => [...prev, createdUser]);
+            setSuccessMessage(`User ${createdUser.displayName} created successfully!`);
+            setUserForm(initialUserFormData); 
+            emailService.sendWelcomeRegistrationEmail(createdUser.email, createdUser.displayName, createdUser.role);
+            await addAdminLogEntry(`Admin created new user: ${createdUser.displayName} (ID: ${createdUser.uniqueId}), Role: ${createdUser.role}.`);
+            navigateTo(Page.UserManagement);
+        } else {
+            setError("Failed to create user. Server response missing ID.");
+        }
       } else {
         setError("Failed to create user. Server did not confirm creation or returned unexpected data.");
       }
@@ -834,34 +970,40 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         email: userForm.email || pendingEmail,
         uniqueId: userForm.uniqueId || pendingUniqueId,
         displayName: userForm.displayName || pendingDisplayName,
-        position: userForm.position || 'Default Position',
+        position: userForm.position || 'Default Position', // Admin must ensure this is adequately set
         userInterests: userForm.userInterests || '',
         phone: userForm.phone || '',
         notificationPreference: userForm.notificationPreference || 'email',
         role: userForm.role || pendingRole,
-        password: pendingPassword, // Password from pending user
-        referringAdminId: referringAdminId || currentUser.id,
+        password: pendingPassword, 
+        referringAdminId: referringAdminId || currentUser.id, // referring admin or current admin
     };
 
     try {
-      const createdUser = await fetchData<User>('/users', { // Create the user first
+      const createdUserResponse = await fetchData<User & { _id?: string }>('/users', { 
         method: 'POST',
         body: JSON.stringify(finalUserDataForCreation),
       });
 
-      if (createdUser && createdUser.id) {
-        setUsers(prev => [...prev, createdUser]); // Add to active users
+      if (createdUserResponse) {
+        const userId = createdUserResponse._id || createdUserResponse.id;
+        if(userId){
+            const createdUser: User = {...createdUserResponse, id: userId, password: ''};
+            if((createdUser as any)._id) delete (createdUser as any)._id;
+            setUsers(prev => [...prev, createdUser]); 
 
-        // Then delete the pending user
-        await fetchData(`/pending-users/${pendingId}`, { method: 'DELETE' });
-        setPendingUsers(prev => prev.filter(pu => pu.id !== pendingId));
-        
-        setApprovingPendingUser(null); 
-        setUserForm(initialUserFormData);
-        setSuccessMessage(`User ${createdUser.displayName} approved and account activated!`);
-        
-        emailService.sendAccountActivatedByAdminEmail(createdUser.email, createdUser.displayName, currentUser.displayName);
-        await addAdminLogEntry(`Admin ${currentUser.displayName} approved pending user: ${createdUser.displayName} (ID: ${createdUser.uniqueId}).`);
+            await fetchData(`/pending-users/${pendingId}`, { method: 'DELETE' });
+            setPendingUsers(prev => prev.filter(pu => pu.id !== pendingId));
+            
+            setApprovingPendingUser(null); 
+            setUserForm(initialUserFormData);
+            setSuccessMessage(`User ${createdUser.displayName} approved and account activated!`);
+            
+            emailService.sendAccountActivatedByAdminEmail(createdUser.email, createdUser.displayName, currentUser.displayName);
+            await addAdminLogEntry(`Admin ${currentUser.displayName} approved pending user: ${createdUser.displayName} (ID: ${createdUser.uniqueId}).`);
+        } else {
+             setError("Failed to create user from pending registration. Server response missing ID.");
+        }
       } else {
         setError("Failed to create user from pending registration. Server did not confirm user creation or returned unexpected data.");
       }
@@ -896,9 +1038,14 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       const userToDelete = users.find(u => u.id === userId);
       await fetchData(`/users/${userId}`, { method: 'DELETE' });
       setUsers(prev => prev.filter(u => u.id !== userId));
-      // Optionally, fetch assignments again or rely on backend to cascade delete/unlink
-      const updatedAssignments = await fetchData<Assignment[]>('/assignments', {}, []);
-      setAssignments(updatedAssignments || []);
+      
+      const updatedAssignmentsResponse = await fetchData<(Assignment & { _id?: string })[]>('/assignments', {}, []);
+      const normalizeId = <T extends { id: string; _id?: string }>(item: T): T => {
+        if (item._id && !item.id) item.id = item._id;
+        delete item._id;
+        return item;
+      };
+      setAssignments((updatedAssignmentsResponse || []).map(a => normalizeId(a)));
       
       setSuccessMessage(`User ${userToDelete?.displayName || 'user'} and their assignments (if any linked on backend) handled.`);
       await addAdminLogEntry(`Admin ${currentUser.displayName} deleted user: ${userToDelete?.displayName || 'user (ID: ' + userId + ')'}.`);
@@ -936,15 +1083,22 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     }
     const newProgramData: Omit<Program, 'id'> = { ...programForm };
     try {
-      const createdProgram = await fetchData<Program>('/programs', {
+      const createdProgramResponse = await fetchData<Program & { _id?: string }>('/programs', {
         method: 'POST',
         body: JSON.stringify(newProgramData),
       });
-      if (createdProgram && createdProgram.id) {
-        setPrograms(prev => [...prev, createdProgram]);
-        setSuccessMessage("Program created successfully!");
-        setProgramForm({ name: '', description: '' }); 
-        if(currentUser) await addAdminLogEntry(`Admin ${currentUser.displayName} created program: ${createdProgram.name}.`);
+      if (createdProgramResponse) {
+        const programId = createdProgramResponse._id || createdProgramResponse.id;
+        if(programId){
+            const createdProgram: Program = {...createdProgramResponse, id: programId};
+            if((createdProgram as any)._id) delete (createdProgram as any)._id;
+            setPrograms(prev => [...prev, createdProgram]);
+            setSuccessMessage("Program created successfully!");
+            setProgramForm({ name: '', description: '' }); 
+            if(currentUser) await addAdminLogEntry(`Admin ${currentUser.displayName} created program: ${createdProgram.name}.`);
+        } else {
+             setError("Failed to create program. Server response missing ID.");
+        }
       } else {
         setError("Failed to create program. Server did not confirm creation or returned unexpected data.");
       }
@@ -959,9 +1113,14 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       const programToDelete = programs.find(p => p.id === programId);
       await fetchData(`/programs/${programId}`, { method: 'DELETE' });
       setPrograms(prev => prev.filter(p => p.id !== programId));
-      // Tasks might need to be re-fetched or updated if backend unlinks them
-      const updatedTasks = await fetchData<Task[]>('/tasks', {}, []);
-      setTasks(updatedTasks || []);
+      
+      const updatedTasksResponse = await fetchData<(Task & { _id?: string })[]>('/tasks', {}, []);
+      const normalizeId = <T extends { id: string; _id?: string }>(item: T): T => {
+        if (item._id && !item.id) item.id = item._id;
+        delete item._id;
+        return item;
+      };
+      setTasks((updatedTasksResponse || []).map(t => normalizeId(t)));
       
       setSuccessMessage(`Program "${programToDelete?.name}" deleted.`);
       if(currentUser) await addAdminLogEntry(`Admin ${currentUser.displayName} deleted program: ${programToDelete?.name}.`);
@@ -979,7 +1138,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       return;
     }
     const associatedProgram = programs.find(p => p.id === taskForm.programId);
-    const newTaskData: Omit<Task, 'id' | 'programName'> & {programName?: string} = { // programName might be set by backend
+    const newTaskData: Omit<Task, 'id' | 'programName'> & {programName?: string} = { 
       ...taskForm,
       deadline: taskForm.deadline ? new Date(taskForm.deadline).toISOString().split('T')[0] : undefined,
     };
@@ -987,15 +1146,24 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
 
     try {
-      const createdTask = await fetchData<Task>('/tasks', {
+      const createdTaskResponse = await fetchData<Task & { _id?: string }>('/tasks', {
         method: 'POST',
         body: JSON.stringify(newTaskData),
       });
-      if (createdTask && createdTask.id) {
-        setTasks(prev => [...prev, createdTask]);
-        setSuccessMessage("Task created successfully!");
-        setTaskForm({ title: '', description: '', requiredSkills: '', programId: '', deadline: '' }); 
-        if(currentUser) await addAdminLogEntry(`Admin ${currentUser.displayName} created task: ${createdTask.title}.`);
+      if (createdTaskResponse) {
+        const taskId = createdTaskResponse._id || createdTaskResponse.id;
+        if(taskId){
+            const createdTask: Task = {...createdTaskResponse, id: taskId};
+            if((createdTask as any)._id) delete (createdTask as any)._id;
+            if(associatedProgram && !createdTask.programName) createdTask.programName = associatedProgram.name; // ensure programName is set if from programId
+
+            setTasks(prev => [...prev, createdTask]);
+            setSuccessMessage("Task created successfully!");
+            setTaskForm({ title: '', description: '', requiredSkills: '', programId: '', deadline: '' }); 
+            if(currentUser) await addAdminLogEntry(`Admin ${currentUser.displayName} created task: ${createdTask.title}.`);
+        } else {
+             setError("Failed to create task. Server response missing ID.");
+        }
       } else {
         setError("Failed to create task. Server did not confirm creation or returned unexpected data.");
       }
@@ -1010,9 +1178,14 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       const taskToDelete = tasks.find(t => t.id === taskId);
       await fetchData(`/tasks/${taskId}`, { method: 'DELETE' });
       setTasks(prev => prev.filter(t => t.id !== taskId));
-      // Assignments might need to be re-fetched or updated
-      const updatedAssignments = await fetchData<Assignment[]>('/assignments', {}, []);
-      setAssignments(updatedAssignments || []);
+      
+      const updatedAssignmentsResponse = await fetchData<(Assignment & { _id?: string })[]>('/assignments', {}, []);
+      const normalizeId = <T extends { id: string; _id?: string }>(item: T): T => {
+        if (item._id && !item.id) item.id = item._id;
+        delete item._id;
+        return item;
+      };
+      setAssignments((updatedAssignmentsResponse || []).map(a => normalizeId(a)));
       
       setSuccessMessage(`Task "${taskToDelete?.title}" deleted.`);
       if(currentUser) await addAdminLogEntry(`Admin ${currentUser.displayName} deleted task: ${taskToDelete?.title}.`);
@@ -1094,12 +1267,17 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     };
 
     try {
-      const createdAssignment = await fetchData<Assignment>('/assignments', {
+      const createdAssignmentResponse = await fetchData<Assignment & { _id?: string }>('/assignments', {
         method: 'POST',
         body: JSON.stringify(newAssignmentData),
       });
 
-      if (createdAssignment && createdAssignment.taskId && createdAssignment.personId ) { // Check for core fields
+      if (createdAssignmentResponse) { 
+        const createdAssignment: Assignment = {...createdAssignmentResponse};
+        // Normalize ID if assignments get their own _id from backend
+        if (createdAssignmentResponse._id && !createdAssignmentResponse.id) createdAssignment.id = createdAssignmentResponse._id;
+        delete (createdAssignment as any)._id;
+
         setAssignments(prev => [...prev, createdAssignment]); 
         setSuccessMessage(`Task "${task.title}" assigned to ${person.displayName}.`);
         setSelectedTaskForAssignment(null);
@@ -1122,19 +1300,23 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     if (!currentUser && newStatus !== 'pending_acceptance') return null; 
     clearMessages();
 
-    const assignmentIdentifier = { taskId, personId }; // Assuming backend can identify by this composite key
-    const payload = { ...assignmentIdentifier, status: newStatus, ...additionalData };
+    // Backend needs to identify which assignment to update.
+    // Assuming PATCH /assignments can find by taskId & personId, or requires a specific assignment ID.
+    // If assignments have their own unique ID 'assignment.id', use that in the URL.
+    // For this example, sending taskId and personId in payload for backend to find.
+    const payload = { taskId, personId, status: newStatus, ...additionalData };
     
     try {
-      // Assuming PATCH /assignments updates an existing assignment.
-      // The backend needs to know which assignment to update.
-      // If assignments have their own unique IDs, use PUT /assignments/:assignmentId
-      const updatedAssignment = await fetchData<Assignment>(`/assignments`, { // Or a more specific endpoint
-        method: 'PATCH', // Or PUT if replacing the whole resource
+      const updatedAssignmentResponse = await fetchData<Assignment & { _id?: string }>(`/assignments`, { 
+        method: 'PATCH', 
         body: JSON.stringify(payload),
       });
 
-      if (updatedAssignment && updatedAssignment.taskId && updatedAssignment.personId) {
+      if (updatedAssignmentResponse) {
+        const updatedAssignment: Assignment = {...updatedAssignmentResponse};
+        if (updatedAssignmentResponse._id && !updatedAssignmentResponse.id) updatedAssignment.id = updatedAssignmentResponse._id;
+        delete (updatedAssignment as any)._id;
+
         setAssignments(prev => prev.map(a => (a.taskId === taskId && a.personId === personId) ? updatedAssignment : a));
         return updatedAssignment;
       } else {
@@ -1188,7 +1370,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     let newStatus: AssignmentStatus = 'submitted_on_time';
     if (assignment.deadline && submissionDate > new Date(assignment.deadline)) {
       newStatus = 'submitted_late';
-      if (!delayReason && assignmentToSubmitDelayReason === `${assignment.taskId}-${assignment.personId}`) { // Check specific assignment
+      if (!delayReason && assignmentToSubmitDelayReason === `${assignment.taskId}-${assignment.personId}`) { 
         setError("A reason is required for late submission.");
         return; 
       }
@@ -1240,19 +1422,24 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       imagePreviewUrl
     };
     try {
-        const createdLog = await fetchData<AdminLogEntry>('/admin-logs', {
+        const createdLogResponse = await fetchData<AdminLogEntry & { _id?: string }>('/admin-logs', {
           method: 'POST',
           body: JSON.stringify(newLogData),
         });
-        if (createdLog && createdLog.id) {
-          setAdminLogs(prev => [createdLog, ...prev]); 
+        if (createdLogResponse) {
+          const logId = createdLogResponse._id || createdLogResponse.id;
+          if(logId){
+            const createdLog: AdminLogEntry = {...createdLogResponse, id: logId};
+            if((createdLog as any)._id) delete (createdLog as any)._id;
+            setAdminLogs(prev => [createdLog, ...prev]); 
+          } else {
+            console.error("Failed to save admin log to backend: No log ID returned.");
+          }
         } else {
-          console.error("Failed to save admin log to backend: No log returned or missing ID.");
-          // setError("Failed to save admin log (server did not confirm)."); // Avoid overwriting more specific errors
+          console.error("Failed to save admin log to backend: No log returned.");
         }
     } catch (error: any) {
         console.error("Failed to save admin log to backend:", error);
-        // setError("Failed to save admin log: " + error.message); // Avoid overwriting
     }
   };
 
@@ -1268,8 +1455,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     let imagePreviewUrl: string | undefined = undefined;
     if (adminLogImageFile) {
         try {
-            // If backend handles image upload and returns a URL, that's better.
-            // For now, sending base64, assuming backend can take it.
             imagePreviewUrl = await new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onloadend = () => resolve(reader.result as string);
@@ -1308,20 +1493,14 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     }
     
     try {
-        // The backend should handle checking if the user exists and sending the email.
-        // The frontend just makes the request.
-        await fetchData('/users/forgot-password', { // Example endpoint
+        await fetchData('/users/forgot-password', {
             method: 'POST',
             body: JSON.stringify({ email: emailToReset }),
         });
         setInfoMessage(`If an account exists for ${emailToReset}, a password reset link has been sent to your email address.`);
     } catch (err: any) {
-        // Even if the user doesn't exist, we might show a generic message for security.
-        // The backend's response could guide this, or we stick to a generic one.
         console.error("Forgot password API call failed:", err);
-        setInfoMessage(`If an account exists for ${emailToReset}, a password reset link has been sent. (Error: ${err.message})`);
-        // Or more generically to avoid confirming emails:
-        // setError("There was an issue processing your request. Please try again later.");
+        setInfoMessage(`If an account exists for ${emailToReset}, a password reset link has been sent. (Server response: ${err.message})`);
     }
   };
   
@@ -1488,18 +1667,18 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                 <div>
                   <label htmlFor="regRole" className="block text-sm font-medium text-textlight">Role</label>
                   <input
-  type="text"
-  value={users.length === 0 ? "Admin (Auto-assigned)" : "User"}
-  disabled
-  className="mt-1 block w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-md shadow-sm"
-/>
-<small className="text-xs text-gray-500">
-  Role will be automatically assigned.
-</small>
-
-                  <p className="mt-1 text-xs text-neutral">
-                    {users.length === 0 ? "First user will be registered as Admin." : "General registration is for 'User' role."}
-                  </p>
+                      type="text"
+                      id="regRole"
+                      value={users.length === 0 ? "Admin (Auto-assigned)" : (newRegistrationForm.role === 'admin' ? "Admin (Requires Approval)" : "User")}
+                      disabled
+                      className="mt-1 block w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-md shadow-sm"
+                      aria-label="Assigned role information"
+                    />
+                    <p className="mt-1 text-xs text-neutral">
+                        {users.length === 0 ? "First user will be automatically registered as Admin." : 
+                        (newRegistrationForm.role === 'admin' ? "Admin registration requires approval if other admins exist." : "General registration is for 'User' role.")
+                        }
+                    </p>
                 </div>
               }
               <button 
@@ -1725,7 +1904,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
             <h2 className="text-2xl font-semibold text-primary mb-1">User Management</h2>
             <p className="text-sm text-neutral mb-6">Manage user accounts, approve registrations, and view user details.</p>
 
-            {/* Create/Edit User Form (Modal or Inline Section) */}
             {editingUserId || approvingPendingUser ? (
               <div className="bg-surface p-6 rounded-lg shadow-md">
                 <h3 className="text-xl font-semibold text-accent mb-4">
@@ -1735,7 +1913,9 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                   <FormInput label="Email" id="userMgmtEmail" type="email" value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} required />
                   <FormInput label="System ID / Username" id="userMgmtUniqueId" type="text" value={userForm.uniqueId} onChange={e => setUserForm({...userForm, uniqueId: e.target.value})} required />
                   <FormInput label="Display Name" id="userMgmtDisplayName" type="text" value={userForm.displayName} onChange={e => setUserForm({...userForm, displayName: e.target.value})} required />
-                  <FormInput label="Position / Role Title" id="userMgmtPosition" type="text" value={userForm.position} onChange={e => setUserForm({...userForm, position: e.target.value})} required />
+                  <FormInput label="Position / Role Title" id="userMgmtPosition" type="text" value={userForm.position} onChange={e => setUserForm({...userForm, position: e.target.value})} required 
+                    placeholder={approvingPendingUser ? "Set user's position (e.g. Member, Officer)" : "User's position"}
+                  />
                   <FormTextarea label="Skills & Interests" id="userMgmtUserInterests" value={userForm.userInterests} onChange={e => setUserForm({...userForm, userInterests: e.target.value})} />
                   <FormInput label="Phone (Optional)" id="userMgmtPhone" type="tel" value={userForm.phone} onChange={e => setUserForm({...userForm, phone: e.target.value})} />
                   <FormSelect label="Notification Preference" id="userMgmtNotificationPreference" value={userForm.notificationPreference} onChange={e => setUserForm({...userForm, notificationPreference: e.target.value as NotificationPreference})}>
@@ -1747,13 +1927,16 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                     <option value="user">User</option>
                     <option value="admin">Admin</option>
                   </FormSelect>
-                  {!approvingPendingUser && ( // Don't show password fields if just approving, password is set from pending user
+                  {!approvingPendingUser && ( 
                     <div className="pt-4 border-t border-gray-200">
                         <h3 className="text-lg font-medium text-textlight mb-2">{editingUserId ? 'Reset Password (Optional)' : 'Set Password'}</h3>
                         <FormInput label="Password" id="userMgmtPassword" type="password" value={userForm.password} onChange={e => setUserForm({...userForm, password: e.target.value})} required={!editingUserId} description={passwordRequirementsText} autoComplete="new-password"/>
                         <FormInput label="Confirm Password" id="userMgmtConfirmPassword" type="password" value={userForm.confirmPassword} onChange={e => setUserForm({...userForm, confirmPassword: e.target.value})} required={!editingUserId} autoComplete="new-password" />
                     </div>
                   )}
+                   {approvingPendingUser && (
+                     <p className="text-sm text-neutral">Password will be set from the user's initial registration submission.</p>
+                   )}
                   <div className="flex space-x-3">
                     <button type="submit" className="btn-success">
                       {editingUserId ? 'Save Changes' : (approvingPendingUser ? 'Approve and Create User' : 'Create User')}
@@ -1763,11 +1946,10 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                 </form>
               </div>
             ) : (
-              <button onClick={() => { setEditingUserId(null); setApprovingPendingUser(null); setUserForm(initialUserFormData); clearMessages(); /*This will effectively make the form 'create'*/ navigateTo(Page.UserManagement, {action: 'createUser'}); _setCurrentPageInternal(Page.UserManagement); /*Force re-render if already on page to show form*/ }} className="btn-primary mb-4 flex items-center"><PlusCircleIcon className="w-5 h-5 mr-2"/>Add New User</button>
+              <button onClick={() => { setEditingUserId(null); setApprovingPendingUser(null); setUserForm(initialUserFormData); clearMessages(); navigateTo(Page.UserManagement, {action: 'createUser'}); _setCurrentPageInternal(Page.UserManagement); }} className="btn-primary mb-4 flex items-center"><PlusCircleIcon className="w-5 h-5 mr-2"/>Add New User</button>
             )}
 
-            {/* Pre-registration Link Generator */}
-             <div className="bg-surface p-6 rounded-lg shadow-md">
+            <div className="bg-surface p-6 rounded-lg shadow-md">
               <h3 className="text-xl font-semibold text-accent mb-3">Pre-registration Link</h3>
               <button onClick={handleGeneratePreRegistrationLink} className="btn-secondary flex items-center"><KeyIcon className="w-5 h-5 mr-2"/>Generate New Link</button>
               {generatedLink && (
@@ -1779,7 +1961,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
             </div>
 
 
-            {/* Pending User Approvals Table */}
             <div className="bg-surface p-6 rounded-lg shadow-md">
               <h3 className="text-xl font-semibold text-accent mb-4">Pending User Approvals ({pendingUsers.length})</h3>
               {pendingUsers.length === 0 ? <p className="text-neutral">No users awaiting approval.</p> : (
@@ -1807,12 +1988,12 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                                   email: pu.email,
                                   uniqueId: pu.uniqueId,
                                   displayName: pu.displayName,
-                                  position: '', // Admin should set this
+                                  position: '', 
                                   userInterests: '',
                                   phone: '',
                                   notificationPreference: 'email',
                                   role: pu.role,
-                                  password: '', // Password is not set here, it's from pu.password
+                                  password: '', 
                                   confirmPassword: '',
                                   referringAdminId: pu.referringAdminId || currentUser.id
                                 });
@@ -1835,13 +2016,11 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
               )}
             </div>
 
-            {/* Active Users Table */}
             <div className="bg-surface p-6 rounded-lg shadow-md">
               <h3 className="text-xl font-semibold text-accent mb-4">Active Users ({users.length})</h3>
               {users.length === 0 ? <p className="text-neutral">No active users found.</p> : (
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
-                    {/* Table Header */}
                     <thead className="bg-bground">
                       <tr>
                         <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase tracking-wider">Display Name</th>
@@ -1850,7 +2029,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                         <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase tracking-wider">Actions</th>
                       </tr>
                     </thead>
-                    {/* Table Body */}
                     <tbody className="bg-surface divide-y divide-gray-200">
                       {users.map(user => (
                         <tr key={user.id}>
@@ -1876,7 +2054,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                             >
                               Edit
                             </button>
-                            {currentUser.id !== user.id && ( // Prevent admin from deleting self
+                            {currentUser.id !== user.id && ( 
                               <button onClick={() => handleDeleteUser(user.id)} className="btn-danger text-xs px-2 py-1" aria-label={`Delete ${user.displayName}`}>Delete</button>
                             )}
                           </td>
@@ -1955,7 +2133,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                         </div>
                         <button onClick={() => handleDeleteTask(task.id)} className="btn-danger text-xs px-2 py-1 self-start ml-4" aria-label={`Delete task ${task.title}`}><TrashIcon className="w-4 h-4"/></button>
                       </div>
-                       {/* Mini assignment overview for this task */}
                         <div className="mt-2 pt-2 border-t border-gray-300">
                             <p className="text-xs font-medium text-neutral">Assigned to:</p>
                             <ul className="text-xs list-disc list-inside pl-2">
