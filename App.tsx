@@ -3,8 +3,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Page, User, Role, Task, Assignment, Program, GeminiSuggestion, NotificationPreference, AssignmentStatus, PendingUser, AdminLogEntry } from './types';
 import useLocalStorage from './hooks/useLocalStorage';
 import { getAssignmentSuggestion } from './services/geminiService';
-import * as emailService from './src/utils/emailService';
-import { validatePassword } from './src/utils/validation';
+import * as emailService from './utils/emailService'; // Corrected import path
+import { validatePassword } from './utils/validation';
 // import * //as cloudDataService from './services/cloudDataService'; // Deactivated
 import LoadingSpinner from './components/LoadingSpinner';
 import { UsersIcon, ClipboardListIcon, LightBulbIcon, CheckCircleIcon, TrashIcon, PlusCircleIcon, KeyIcon, BriefcaseIcon, LogoutIcon, UserCircleIcon } from './components/Icons';
@@ -58,6 +58,19 @@ const FormSelect: React.FC<React.SelectHTMLAttributes<HTMLSelectElement> & { lab
     </select>
   </div>
 );
+
+// Interface to represent the structure of a pending user object from the backend
+interface BackendPendingUser {
+  _id?: string; // Potential MongoDB-style ID
+  id?: string;  // If backend sometimes sends 'id'
+  uniqueId: string;
+  displayName: string;
+  email: string;
+  password: string; // The password submitted by the user
+  role: Role;
+  submissionDate: string;
+  referringAdminId?: string;
+}
 
 const initialPreRegistrationFormState = {
   uniqueId: '', 
@@ -391,54 +404,99 @@ const handleNewRegistration = async (e: React.FormEvent) => {
 
   const actualRoleToRegister = users.length === 0 ? 'admin' : formRole;
 
-  const newPendingUserData = {
-    displayName: name,
-    email,
-    password,
-    role: actualRoleToRegister,
-    uniqueId: email,
-    submissionDate: new Date().toISOString(),
-  };
+  if (actualRoleToRegister === 'admin') {
+    const newAdminUserData: Omit<User, 'id'> = {
+      displayName: name,
+      email,
+      password, // Password will be hashed by backend
+      role: 'admin',
+      uniqueId: email, // Using email as uniqueId for initial admin
+      position: 'Administrator', // Default position
+      userInterests: '',
+      phone: '',
+      notificationPreference: 'email',
+    };
 
-  try {
-    const response = await fetchData<{ success: boolean; user: PendingUser }>('/pending-users', {
-      method: 'POST',
-      body: JSON.stringify(newPendingUserData),
-    });
+    try {
+      const createdAdmin = await fetchData<User>('/users', {
+        method: 'POST',
+        body: JSON.stringify(newAdminUserData),
+      });
 
-    const createdPendingUser = response?.user;
-    const normalizedId = createdPendingUser?._id || createdPendingUser?.id;
-
-    if (createdPendingUser && normalizedId) {
-      createdPendingUser.id = normalizedId;
-
-      setPendingUsers(prev => [...prev, createdPendingUser]);
-      if (actualRoleToRegister === 'admin' && users.length === 0) {
-  setSuccessMessage("Admin registered successfully! You can now log in.");
-} else {
-  setSuccessMessage("Registration submitted successfully! Your account is pending administrator approval.");
-}
-      setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user' });
-
-      emailService.sendRegistrationPendingToUserEmail(createdPendingUser.email, createdPendingUser.displayName);
-
-      const adminToNotify = getAdminToNotify();
-      if (adminToNotify) {
-        emailService.sendNewPendingRegistrationToAdminEmail(
-          adminToNotify.email,
-          adminToNotify.displayName,
-          createdPendingUser.displayName,
-          createdPendingUser.email
-        );
+      if (createdAdmin && createdAdmin.id) {
+        setUsers(prev => [...prev, createdAdmin]);
+        setSuccessMessage("Admin account registered successfully! You can now log in.");
+        setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user' }); // Reset form for next potential user registration
+         // After successful admin registration, future registrations should default to 'user' role
+        setNewRegistrationForm(prev => ({ ...prev, role: 'user' }));
+        emailService.sendWelcomeRegistrationEmail(createdAdmin.email, createdAdmin.displayName, createdAdmin.role);
+        // Navigate to login or directly log them in if desired (current setup requires login)
+        setAuthView('login'); // Switch to login view
+      } else {
+        setError("Failed to register admin account. Server did not confirm creation or returned unexpected data.");
       }
-    } else {
-      setError("Failed to submit registration. The server did not confirm creation or returned unexpected data.");
+    } catch (err: any) {
+      setError(err.message || "Failed to register admin account. Please try again later.");
     }
-  } catch (err: any) {
-    setError(err.message || "Failed to submit registration. Please try again later.");
+  } else { // actualRoleToRegister === 'user'
+    const newPendingUserData = { // This is Omit<PendingUser, 'id' | 'submissionDate'> effectively
+      displayName: name,
+      email,
+      password, // Password will be stored with pending user, then used for actual user creation
+      role: actualRoleToRegister, // Should be 'user'
+      uniqueId: email, // Using email as uniqueId for pending user as well
+      submissionDate: new Date().toISOString(),
+    };
+
+    try {
+      const response = await fetchData<{ success: boolean; user: BackendPendingUser }>('/pending-users', {
+        method: 'POST',
+        body: JSON.stringify(newPendingUserData),
+      });
+
+      const backendUser = response?.user;
+
+      if (backendUser) {
+        const normalizedId = backendUser._id || backendUser.id;
+
+        if (normalizedId) {
+          const createdPendingUser: PendingUser = {
+            id: normalizedId,
+            uniqueId: backendUser.uniqueId,
+            displayName: backendUser.displayName,
+            email: backendUser.email,
+            password: backendUser.password,
+            role: backendUser.role,
+            submissionDate: backendUser.submissionDate,
+            referringAdminId: backendUser.referringAdminId,
+          };
+          
+          setPendingUsers(prev => [...prev, createdPendingUser]);
+          setSuccessMessage("Registration submitted successfully! Your account is pending administrator approval.");
+          setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user' });
+          
+          emailService.sendRegistrationPendingToUserEmail(createdPendingUser.email, createdPendingUser.displayName);
+          const adminToNotify = getAdminToNotify();
+          if (adminToNotify) {
+            emailService.sendNewPendingRegistrationToAdminEmail(
+              adminToNotify.email,
+              adminToNotify.displayName,
+              createdPendingUser.displayName,
+              createdPendingUser.email
+            );
+          }
+          setAuthView('login'); 
+        } else {
+          setError("Failed to submit registration. Server response missing user ID.");
+        }
+      } else {
+        setError("Failed to submit registration. Server did not confirm creation or returned unexpected data.");
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to submit registration for approval. Please try again later.");
+    }
   }
 };
-
   
 // Pre-Registration Handler
 const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
@@ -476,61 +534,75 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     return;
   }
 
-  const newPendingUserData = {
+  const newPendingUserData = { // This is Omit<PendingUser, 'id' | 'submissionDate'> effectively
     uniqueId,
     displayName,
     email,
     password,
-    role: 'user',
+    role: 'user' as Role, // Pre-registrations are always for 'user' role
     referringAdminId: referringAdminId || undefined,
     submissionDate: new Date().toISOString(),
   };
 
   try {
-    const response = await fetchData<{ success: boolean; user: PendingUser }>('/pending-users', {
+    const response = await fetchData<{ success: boolean; user: BackendPendingUser }>('/pending-users', {
       method: 'POST',
       body: JSON.stringify(newPendingUserData),
     });
 
-    const createdPendingUser = response?.user;
-    const normalizedId = createdPendingUser?._id || createdPendingUser?.id;
+    const backendUser = response?.user;
 
-    if (createdPendingUser && normalizedId) {
-      createdPendingUser.id = normalizedId;
+    if (backendUser) {
+      const normalizedId = backendUser._id || backendUser.id;
 
-      setPendingUsers(prev => [...prev, createdPendingUser]);
-      setSuccessMessage("Pre-registration submitted successfully! Your account is pending administrator approval. You will be notified via email.");
-      setPreRegistrationForm(prev => ({
-        ...initialPreRegistrationFormState,
-        referringAdminId: prev.referringAdminId,
-        referringAdminDisplayName: prev.referringAdminDisplayName,
-        isReferralLinkValid: prev.isReferralLinkValid
-      }));
+      if (normalizedId) {
+        const createdPendingUser: PendingUser = {
+          id: normalizedId,
+          uniqueId: backendUser.uniqueId,
+          displayName: backendUser.displayName,
+          email: backendUser.email,
+          password: backendUser.password,
+          role: backendUser.role,
+          submissionDate: backendUser.submissionDate,
+          referringAdminId: backendUser.referringAdminId,
+        };
 
-      const referringAdmin = users.find(u => u.id === referringAdminId);
-      emailService.sendPreRegistrationSubmittedToUserEmail(
-        createdPendingUser.email,
-        createdPendingUser.displayName,
-        referringAdmin?.displayName || 'the administrator'
-      );
+        setPendingUsers(prev => [...prev, createdPendingUser]);
+        setSuccessMessage("Pre-registration submitted successfully! Your account is pending administrator approval. You will be notified via email.");
+        setPreRegistrationForm(prev => ({
+          ...initialPreRegistrationFormState,
+          referringAdminId: prev.referringAdminId,
+          referringAdminDisplayName: prev.referringAdminDisplayName,
+          isReferralLinkValid: prev.isReferralLinkValid
+        })); 
 
-      if (referringAdmin) {
-        emailService.sendPreRegistrationNotificationToAdminEmail(
-          referringAdmin.email,
-          referringAdmin.displayName,
+        const referringAdmin = users.find(u => u.id === createdPendingUser.referringAdminId);
+        emailService.sendPreRegistrationSubmittedToUserEmail(
+          createdPendingUser.email,
           createdPendingUser.displayName,
-          createdPendingUser.uniqueId
+          referringAdmin?.displayName || 'the administrator'
         );
-      } else {
-        const generalAdmin = getAdminToNotify();
-        if (generalAdmin) {
+
+        if (referringAdmin) {
           emailService.sendPreRegistrationNotificationToAdminEmail(
-            generalAdmin.email,
-            generalAdmin.displayName,
+            referringAdmin.email,
+            referringAdmin.displayName,
             createdPendingUser.displayName,
             createdPendingUser.uniqueId
           );
+        } else {
+          const generalAdmin = getAdminToNotify();
+          if (generalAdmin) {
+            emailService.sendPreRegistrationNotificationToAdminEmail(
+              generalAdmin.email,
+              generalAdmin.displayName,
+              createdPendingUser.displayName,
+              createdPendingUser.uniqueId
+            );
+          }
         }
+      } else {
+        setError("Failed to submit pre-registration. Server response missing user ID.");
       }
     } else {
       setError("Failed to submit pre-registration. Server did not confirm creation or returned unexpected data.");
@@ -580,13 +652,12 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         setAssignments(updatedAssignments || []);
         setAdminLogs(updatedAdminLogs || []);
         
-        if ((updatedUsers || []).length === 0 && loggedInUser.role !== 'admin') {
-             // This should ideally not happen if login implies user exists.
-             // But as a safeguard for the role logic if it's the first user somehow.
-            setNewRegistrationForm(prev => ({ ...prev, role: 'admin' }));
-        } else if ((updatedUsers || []).length > 0 && newRegistrationForm.role === 'admin') {
+        // This ensures that if the just-logged-in user was the first admin,
+        // the registration form role correctly defaults to 'user' for next registrations.
+        if ((updatedUsers || []).length > 0 && newRegistrationForm.role === 'admin') {
             setNewRegistrationForm(prev => ({ ...prev, role: 'user' }));
         }
+
 
         setIsLoadingAppData(false);
 
@@ -623,7 +694,12 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     setAssignments([]);
     setAdminLogs([]);
     setSuccessMessage("You have been logged out successfully.");
-    setNewRegistrationForm(prev => ({ ...prev, role: 'user' })); // Reset for next potential registration
+    // After logout, if no users exist (e.g. if the only admin was deleted, though not typical via UI),
+    // then the registration form should default to admin. Otherwise, default to user.
+    // However, users array is cleared, so we need a different check or rely on initial load data.
+    // For simplicity, just set to user, as login screen implies system is set up.
+    // The loadAllData on next app load will correctly set the role if users is empty.
+    setNewRegistrationForm(prev => ({ ...prev, role: 'user' }));
     navigateTo(Page.Login);
   };
 
@@ -830,18 +906,26 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
     const { id: pendingId, uniqueId: pendingUniqueId, displayName: pendingDisplayName, email: pendingEmail, password: pendingPassword, role: pendingRole, referringAdminId } = approvingPendingUser;
 
+    // Use userForm for fields that admin might have edited during approval prep, fallback to pendingUser data
     const finalUserDataForCreation: Omit<User, 'id'> = {
         email: userForm.email || pendingEmail,
         uniqueId: userForm.uniqueId || pendingUniqueId,
         displayName: userForm.displayName || pendingDisplayName,
-        position: userForm.position || 'Default Position',
+        position: userForm.position || 'Default Position', // Admin should ideally set this
         userInterests: userForm.userInterests || '',
         phone: userForm.phone || '',
         notificationPreference: userForm.notificationPreference || 'email',
-        role: userForm.role || pendingRole,
-        password: pendingPassword, // Password from pending user
-        referringAdminId: referringAdminId || currentUser.id,
+        role: userForm.role || pendingRole, // Admin can change role during approval
+        password: pendingPassword, // IMPORTANT: Use the password stored with the pending user
+        referringAdminId: referringAdminId || currentUser.id, // ID of admin who approved or original referrer
     };
+    
+    // Ensure critical fields are present before attempting creation
+    if (!finalUserDataForCreation.email || !finalUserDataForCreation.uniqueId || !finalUserDataForCreation.displayName || !finalUserDataForCreation.position) {
+        setError("Cannot approve: Email, System ID, Display Name, and Position are required. Please ensure these are set in the form.");
+        return;
+    }
+
 
     try {
       const createdUser = await fetchData<User>('/users', { // Create the user first
@@ -1803,18 +1887,18 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                             <button
                               onClick={() => {
                                 setApprovingPendingUser(pu);
-                                setUserForm({
+                                setUserForm({ // Pre-fill form with pending user's data
                                   email: pu.email,
                                   uniqueId: pu.uniqueId,
                                   displayName: pu.displayName,
-                                  position: '', // Admin should set this
+                                  position: '', // Admin should set this during approval
                                   userInterests: '',
                                   phone: '',
-                                  notificationPreference: 'email',
-                                  role: pu.role,
-                                  password: '', // Password is not set here, it's from pu.password
+                                  notificationPreference: 'email', // Default for new user
+                                  role: pu.role, // Role from pending user
+                                  password: '', // Password is not set here; it's taken from pu.password
                                   confirmPassword: '',
-                                  referringAdminId: pu.referringAdminId || currentUser.id
+                                  referringAdminId: pu.referringAdminId || (currentUser ? currentUser.id : '')
                                 });
                                 setEditingUserId(null); 
                                 navigateTo(Page.UserManagement, {action: 'approveUser', userId: pu.id});_setCurrentPageInternal(Page.UserManagement);
