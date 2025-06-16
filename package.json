@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "vite preview --host"
+    "start": "vite"
+
   },
   "dependencies": {
     "@google/genai": "^1.0.1",
