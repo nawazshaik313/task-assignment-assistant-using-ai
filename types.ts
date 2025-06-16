@@ -17,7 +17,7 @@ export interface User {
   id: string; // Internal unique ID for the user record
   email: string; // Primary identifier for login, mandatory.
   uniqueId: string; // System-specific username or secondary ID, chosen during profile setup.
-  password: string; // Password for this system.
+  password?: string; // Password for this system - optional as not always present (e.g. when fetching user data)
   role: Role;
   displayName: string;
   position: string;
@@ -25,19 +25,19 @@ export interface User {
   phone?: string; // Optional, can be different from login mechanism
   notificationPreference?: NotificationPreference;
   referringAdminId?: string;
+  token?: string; // Optional JWT token for session management
 }
 
 export interface PendingUser {
-  _id?: string;
-  id?: string; // ✅ Add this if missing
-  email: string;
-  displayName: string;
-  password?: string;
-  role: string;
-  uniqueId: string;
-  submissionDate?: string;
+  id: string;
+  uniqueId: string; 
+  displayName:string;
+  email: string; 
+  password: string; 
+  role: Role; // Intended role from registration
+  submissionDate: string;
+  referringAdminId?: string; // Optional: ID of admin who generated pre-reg link, or system if general reg.
 }
-
 
 export interface Program {
   id: string;
