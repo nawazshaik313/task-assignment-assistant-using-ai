@@ -278,8 +278,9 @@ export const App = (): JSX.Element => {
 
       if (newLog && newLog.id) {
         setAdminLogs(prevLogs => [newLog, ...prevLogs].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
+        console.log('[App.tsx] Admin log entry added locally:', newLog);
       } else {
-        console.error("Failed to create admin log entry: API returned null or invalid data. Check console for fetchData logs.");
+        console.error("[App.tsx] Failed to create admin log entry or API returned invalid data. NewLog:", newLog);
         // setError("Failed to record admin activity."); // Optional: if you want to show users this error
       }
     } catch (error: any) {
@@ -287,7 +288,7 @@ export const App = (): JSX.Element => {
       console.error('Unexpected error in addAdminLogEntry:', error);
       // setError(`Failed to record admin activity: ${error.message}`); // Optional
     }
-  }, [currentUser, setAdminLogs]);
+  }, [currentUser]);
 
 
   const loadInitialData = useCallback(async (loggedInUserTokenData?: User) => { // Token data includes orgId
@@ -347,6 +348,7 @@ export const App = (): JSX.Element => {
         setPrograms(loadedPrograms || []);
         setAssignments(loadedAssignments || []);
         setAdminLogs(loadedAdminLogs || []);
+        console.log('[App.tsx] Initial Loaded Admin Logs:', loadedAdminLogs);
       } else {
         // No active user, clear all data arrays
         setUsers([]); setPendingUsers([]); setTasks([]); setPrograms([]); setAssignments([]); setAdminLogs([]);
@@ -1103,17 +1105,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     try {
       const taskToDelete = tasks.find(t => t.id === taskId);
       await fetchData(`/tasks/${taskId}`, { method: 'DELETE' });
-      // Remaining App.tsx content...
-      // Ensure all other functions using addAdminLogEntry are correctly implemented or reviewed.
-      // This is a partial update focusing on the error fixes.
-      // Make sure the rest of the file content follows from where this snippet ends.
-      // For brevity, only showing up to the fixed and newly added parts.
-      // The rest of your App.tsx content that was already there and correct would follow.
-      // ... (rest of App.tsx)
-
-      // Placeholder for the rest of the component
-      // NOTE: The UI rendering part of App.tsx is omitted for brevity as it was not directly related to the errors.
-      // It should be included in the actual full file content.
       setTasks(prev => prev.filter(t => t.id !== taskId));
       const updatedAssignments = await fetchData<Assignment[]>('/assignments', {}, []);
       setAssignments(updatedAssignments || []);
@@ -1142,19 +1133,11 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       return;
     }
 
-    // Check if user already has this task or another active task (depending on desired logic)
     const existingAssignmentForTask = assignments.find(a => a.taskId === taskId && a.personId === personId && a.organizationId === currentUser.organizationId);
     if (existingAssignmentForTask) {
         setError(`${personToAssign.displayName} is already assigned to task "${taskToAssign.title}".`);
         return;
     }
-    // Optional: Check if user has ANY active task if one user can only have one active task at a time
-    // const userHasOtherActiveTask = assignments.find(a => a.personId === personId && (a.status === 'pending_acceptance' || a.status === 'accepted_by_user'));
-    // if (userHasOtherActiveTask) {
-    //   setError(`${personToAssign.displayName} already has an active task: "${userHasOtherActiveTask.taskTitle}".`);
-    //   return;
-    // }
-
 
     const newAssignmentData = {
       taskId,
@@ -1162,8 +1145,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       justification: assignmentSuggestion?.suggestedPersonName === personToAssign.displayName ? assignmentSuggestion.justification : 'Manual assignment',
       deadline: assignmentForm.specificDeadline ? new Date(assignmentForm.specificDeadline).toISOString() : taskToAssign.deadline,
       status: 'pending_acceptance' as AssignmentStatus,
-      // taskTitle and personName will be set by backend based on IDs
-      // organizationId will be set by backend based on current admin's organizationId
     };
 
     try {
@@ -1178,7 +1159,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         setSelectedTaskForAssignment(null);
         setAssignmentSuggestion(null);
         setAssignmentForm({ specificDeadline: ''});
-        // Email notification is handled by the backend
         await addAdminLogEntry(`Admin ${currentUser.displayName} assigned task "${taskToAssign.title}" to ${personToAssign.displayName}.`);
       } else {
         setError("Failed to assign task. API did not return a valid assignment.");
@@ -1210,12 +1190,9 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       }
     }
 
-    // User role-specific logic already handled on backend, but good to be aware here
-    // Admins can approve. Users can accept/decline/submit their own.
-
     try {
-      const updatedAssignment = await fetchData<Assignment>('/assignments', { // Endpoint uses PATCH not PUT for partial update
-        method: 'PATCH', // Changed from PUT to PATCH as it's typically a status update
+      const updatedAssignment = await fetchData<Assignment>('/assignments', { 
+        method: 'PATCH', 
         body: JSON.stringify(payload),
       });
 
@@ -1232,7 +1209,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
            await addAdminLogEntry(`User ${currentUser.displayName} updated status of task "${taskTitle}" to ${status.replace(/_/g, ' ')}.`);
         }
 
-        setAssignmentToSubmitDelayReason(null); // Clear delay reason prompt
+        setAssignmentToSubmitDelayReason(null); 
         setUserSubmissionDelayReason('');
 
       } else {
@@ -1254,7 +1231,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     setAssignmentSuggestion(null);
     setError(null);
 
-    // Pass current assignments to filter users who already have active tasks
     const suggestion = await getAssignmentSuggestion(task, users, programs, assignments);
     setAssignmentSuggestion(suggestion);
     setIsLoadingSuggestion(false);
@@ -1289,15 +1265,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
         let imageUrl: string | undefined = undefined;
         if (adminLogImageFile) {
-            // In a real app, you'd upload to a service like Cloudinary, S3, Firebase Storage
-            // and get back a URL. For this demo, we'll simulate a URL or use a placeholder.
-            // This is a placeholder step. For actual image upload, you need a backend endpoint.
-            // For now, let's assume the backend /admin-logs can take a base64 string or a pre-signed URL.
-            // Simplified: we're not actually uploading, just pretending imagePreviewUrl would be set.
-            // If backend supports base64:
-            // imageUrl = await toBase64(adminLogImageFile);
-            // This example will assume backend just takes a string `imagePreviewUrl` that front-end
-            // *would* have gotten from an upload service.
             console.warn("Image upload simulation: In a real app, upload image and get URL here.");
             imageUrl = `https://via.placeholder.com/150/0000FF/808080?Text=Preview+${adminLogImageFile.name.substring(0,10)}`; // Placeholder
         }
@@ -1307,7 +1274,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
             setSuccessMessage("Admin log entry added.");
             setAdminLogText('');
             setAdminLogImageFile(null);
-            // Note: adminLogs state is updated by addAdminLogEntry itself
         } catch (error: any) {
             setError("Failed to add admin log: " + error.message);
         } finally {
@@ -1323,13 +1289,22 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         clearMessages();
         setIsRefreshingDashboard(true);
         try {
-          const [loadedUsers, loadedPendingUsers] = await Promise.all([
+          const [loadedUsers, loadedPendingUsers, loadedAdminLogsRefresh] = await Promise.all([
             fetchData<User[]>('/users', {}, []),
-            fetchData<PendingUser[]>('/pending-users', {}, [])
+            fetchData<PendingUser[]>('/pending-users', {}, []),
+            fetchData<AdminLogEntry[]>('/admin-logs', {}, [])
           ]);
 
           if (loadedUsers) setUsers(loadedUsers);
           if (loadedPendingUsers) setPendingUsers(loadedPendingUsers);
+          
+          if (loadedAdminLogsRefresh) {
+            setAdminLogs(loadedAdminLogsRefresh);
+            console.log('[App.tsx] Refreshed Admin Logs:', loadedAdminLogsRefresh);
+          } else {
+            setAdminLogs([]); 
+            console.log('[App.tsx] Refreshed Admin Logs: No logs returned or fetch failed, set to empty.');
+          }
           setSuccessMessage("Dashboard data refreshed.");
         } catch (err: any) {
           console.error("Error refreshing dashboard data:", err);
@@ -1340,16 +1315,10 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       }, [currentUser, clearMessages]);
 
 
-  // UI Rendering based on currentPage
-  // This part is extensive and assumed to be largely correct based on original problem.
-  // For brevity, only showing a skeleton.
-  // ... All the page rendering logic based on currentPage ...
-
   if (isLoadingAppData) {
     return <div className="flex items-center justify-center min-h-screen bg-background"><LoadingSpinner /></div>;
   }
 
-  // Handle PreRegistration Page separately as it's outside the main authenticated layout
   if (currentPage === Page.PreRegistration) {
     return (
       <PreRegistrationFormPage
@@ -1367,7 +1336,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
 
   if (!currentUser) {
-    // Determine which auth view to show: Login or Registration
     const AuthViewComponent = () => (
       <div className="min-h-screen flex flex-col items-center justify-center bg-authPageBg p-4">
         <div className="bg-surface p-8 rounded-xl shadow-2xl w-full max-w-md">
@@ -1396,7 +1364,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                 <button type="button" onClick={() => navigateTo(Page.PreRegistration)} className="font-medium text-authLink hover:underline">Invited? Pre-register</button>
               </p>
             </>
-          ) : ( // authView === 'register'
+          ) : ( 
             <>
               <h2 className="text-3xl font-bold text-textlight mb-6 text-center">Create Account</h2>
               <form onSubmit={handleNewRegistration} className="space-y-4">
@@ -1457,16 +1425,14 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     return <AuthViewComponent />;
   }
 
-  // Main application layout for authenticated users
   return (
     <div className="flex h-screen bg-background">
       <TopNavbar currentUser={currentUser} currentPage={currentPage} navigateTo={navigateTo} handleLogout={handleLogout} />
-      <main className="flex-1 p-6 overflow-y-auto mt-16"> {/* Add mt-16 for top navbar offset */}
+      <main className="flex-1 p-6 overflow-y-auto mt-16 main-app-scope"> 
         {error && <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded-md shadow-lg" role="alert"><p><strong className="font-bold">Error:</strong> {error}</p><button onClick={clearMessages} className="ml-4 text-sm font-bold text-red-800 hover:text-red-900">Dismiss</button></div>}
         {successMessage && <div className="mb-4 p-4 bg-green-100 border border-green-400 text-green-700 rounded-md shadow-lg" role="alert"><p>{successMessage}</p><button onClick={clearMessages} className="ml-4 text-sm font-bold text-green-800 hover:text-green-900">Dismiss</button></div>}
         {infoMessage && <div className="mb-4 p-4 bg-blue-100 border border-blue-400 text-blue-700 rounded-md shadow-lg" role="status"><p>{infoMessage}</p><button onClick={clearMessages} className="ml-4 text-sm font-bold text-blue-800 hover:text-blue-900">Dismiss</button></div>}
 
-        {/* Render page content based on currentPage */}
         {currentPage === Page.Dashboard && currentUser.role === 'admin' && (
           <div className="space-y-6">
             <div className="flex justify-between items-center">
@@ -1507,7 +1473,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                 <p className="text-sm text-neutral">Tasks currently in progress or awaiting acceptance</p>
               </div>
             </div>
-             {/* Admin Log Section */}
             <div className="bg-surface p-6 rounded-lg shadow-lg mt-6">
                 <h3 className="text-xl font-medium text-textlight mb-4">Admin Activity Log</h3>
                 <form onSubmit={handleAddAdminLogWithImage} className="mb-4 space-y-3">
@@ -1572,10 +1537,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
             </form>
           </div>
         )}
-
-        {/* Other page renderings (UserManagement, ManagePrograms, etc.) would go here */}
-        {/* This is a simplified representation to keep the response focused */}
-
 
         {currentPage === Page.UserManagement && currentUser.role === 'admin' && (
           <div className="space-y-8">
@@ -1655,7 +1616,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
               )}
             </div>
 
-            {/* Table of Users */}
             <div className="bg-surface p-6 rounded-lg shadow-xl overflow-x-auto">
               <h3 className="text-xl font-medium text-textlight mb-4">Registered Users</h3>
                <table className="min-w-full divide-y divide-gray-200">
@@ -1679,10 +1639,10 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                         <td className="px-6 py-4 whitespace-nowrap">{user.position}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
                           <button onClick={() => { setEditingUserId(user.id); setUserForm({...user, password:'', confirmPassword:''}); navigateTo(Page.UserManagement, {action: 'edit', userId: user.id});}} className="text-primary hover:text-primary-dark">Edit</button>
-                          {currentUser.id !== user.id && user.role !== 'admin' && ( // Prevent self-delete or deleting other admins here
+                          {currentUser.id !== user.id && user.role !== 'admin' && ( 
                              <button onClick={() => handleDeleteUser(user.id)} className="text-danger hover:text-red-700">Delete</button>
                           )}
-                           {currentUser.id !== user.id && user.role === 'admin' && users.filter(u=>u.role==='admin').length > 1 && ( // Allow deleting other admins IF not the last one
+                           {currentUser.id !== user.id && user.role === 'admin' && users.filter(u=>u.role==='admin').length > 1 && ( 
                              <button onClick={() => handleDeleteUser(user.id)} className="text-danger hover:text-red-700">Delete</button>
                           )}
                         </td>
@@ -1692,7 +1652,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                 </table>
             </div>
 
-            {/* Pending Users Section */}
             {approvingPendingUser && (
                 <div className="bg-surface p-6 rounded-lg shadow-xl mt-6">
                     <h3 className="text-xl font-medium text-textlight mb-4">Review & Approve: {approvingPendingUser.displayName} ({approvingPendingUser.email})</h3>
@@ -1701,7 +1660,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                         <FormInput label="Position (Required)" id="approvePosition" type="text" value={userForm.position} onChange={e => setUserForm({...userForm, position: e.target.value})} required />
                         <FormSelect label="Assign Role (Required)" id="approveRole" value={userForm.role} onChange={e => setUserForm({...userForm, role: e.target.value as Role})} required>
                              <option value="user">User</option>
-                             {/* Only allow approving as admin if no other admin exists in their org, backend handles this primary check */}
                              <option value="admin">Admin (Use with caution)</option>
                         </FormSelect>
                         <FormTextarea label="User Interests (Optional)" id="approveUserInterests" value={userForm.userInterests} onChange={e => setUserForm({...userForm, userInterests: e.target.value})} />
@@ -1847,13 +1805,12 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
           <div className="space-y-6">
             <h2 className="text-3xl font-semibold text-primary mb-6">Assign Work</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Task Selection Column */}
                 <div className="bg-surface p-6 rounded-lg shadow-xl space-y-4">
                     <h3 className="text-xl font-medium text-textlight">1. Select a Task</h3>
                     {tasks.length === 0 && <p className="text-neutral">No tasks available to assign. Create tasks in 'Manage Tasks'.</p>}
                     <ul className="max-h-96 overflow-y-auto space-y-2">
                     {tasks
-                        .filter(task => !assignments.some(a => a.taskId === task.id && (a.status === 'pending_acceptance' || a.status === 'accepted_by_user' || a.status === 'completed_admin_approved'))) // Filter out already assigned active/completed tasks
+                        .filter(task => !assignments.some(a => a.taskId === task.id && (a.status === 'pending_acceptance' || a.status === 'accepted_by_user' || a.status === 'completed_admin_approved'))) 
                         .map(task => (
                         <li key={task.id}>
                             <button
@@ -1868,7 +1825,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                     </ul>
                 </div>
 
-                {/* Person Selection & Assignment Form Column */}
                 {selectedTaskForAssignment && (
                     <div className="bg-surface p-6 rounded-lg shadow-xl space-y-4">
                         <h3 className="text-xl font-medium text-textlight">2. Assign Task: <span className="text-secondary">{tasks.find(t=>t.id ===selectedTaskForAssignment)?.title}</span></h3>
@@ -1892,7 +1848,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                             <FormSelect label="Select Person" id="assignPerson" name="assignPerson" defaultValue={users.find(u => u.displayName === assignmentSuggestion?.suggestedPersonName)?.id || ""}>
                             <option value="" disabled>-- Choose a person --</option>
                             {users
-                                .filter(user => user.role === 'user' && !assignments.some(a => a.personId === user.id && (a.status === 'pending_acceptance' || a.status === 'accepted_by_user'))) // Filter out users with current active tasks
+                                .filter(user => user.role === 'user' && !assignments.some(a => a.personId === user.id && (a.status === 'pending_acceptance' || a.status === 'accepted_by_user'))) 
                                 .map(user => (
                                 <option key={user.id} value={user.id}>
                                     {user.displayName} ({user.position}) - Interests: {user.userInterests?.substring(0,30) || 'N/A'}...
@@ -1927,8 +1883,8 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
             )}
             <ul className="space-y-4">
               {assignments
-                .filter(a => currentUser.role === 'admin' || a.personId === currentUser.id) // Admins see all, users see their own
-                .sort((a,b) => new Date(b.deadline || 0).getTime() - new Date(a.deadline || 0).getTime()) // Sort by deadline desc
+                .filter(a => currentUser.role === 'admin' || a.personId === currentUser.id) 
+                .sort((a,b) => new Date(b.deadline || 0).getTime() - new Date(a.deadline || 0).getTime()) 
                 .map(assignment => {
                 const taskDetails = tasks.find(t => t.id === assignment.taskId);
                 const isUserAssignment = assignment.personId === currentUser.id;
@@ -1959,7 +1915,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                         </div>
                     </div>
 
-                    {/* Action Buttons */}
                     <div className="mt-4 pt-3 border-t border-gray-200 flex flex-wrap gap-2">
                       {isUserAssignment && assignment.status === 'pending_acceptance' && (
                         <>
