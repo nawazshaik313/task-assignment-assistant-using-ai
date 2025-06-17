@@ -380,15 +380,44 @@ export const App = (): JSX.Element => {
 
       if (targetPageFromHashPath === Page.PreRegistration) {
         const refAdminIdFromHash = params.get('refAdminId');
-        fetchData<User[]>(`/users?role=admin&id=${refAdminIdFromHash}`, {}, []).then(admins => {
-            const adminUser = admins ? admins.find(u => u.id === refAdminIdFromHash) : null;
+        if (!refAdminIdFromHash) {
             setPreRegistrationForm(prev => ({
-              ...initialPreRegistrationFormState,
-              referringAdminId: refAdminIdFromHash || '',
-              referringAdminDisplayName: adminUser ? adminUser.displayName : (refAdminIdFromHash ? `Admin (Site ID: ${refAdminIdFromHash})`: 'an administrator'),
-              isReferralLinkValid: !!refAdminIdFromHash
+                ...initialPreRegistrationFormState, // Reset other fields
+                referringAdminId: '',
+                referringAdminDisplayName: 'N/A (No ID Provided)',
+                isReferralLinkValid: false
             }));
-        });
+        } else {
+            fetchData<{ success: boolean; isValidRef: boolean; displayName?: string; organizationId?: string; message?: string }>(
+                `/users/validate-admin-ref/${refAdminIdFromHash}`, 
+                {}, 
+                null
+            ).then(validationResult => {
+                if (validationResult && validationResult.success && validationResult.isValidRef && validationResult.displayName) {
+                    setPreRegistrationForm(prev => ({
+                        ...initialPreRegistrationFormState, // Reset other fields like uniqueId, password etc.
+                        referringAdminId: refAdminIdFromHash,
+                        referringAdminDisplayName: validationResult.displayName,
+                        isReferralLinkValid: true
+                    }));
+                } else {
+                    setPreRegistrationForm(prev => ({
+                        ...initialPreRegistrationFormState,
+                        referringAdminId: refAdminIdFromHash,
+                        referringAdminDisplayName: `Invalid Admin Link (${validationResult?.message || 'Validation failed'})`,
+                        isReferralLinkValid: false
+                    }));
+                }
+            }).catch(err => {
+                console.error("Error validating admin ref for pre-registration:", err);
+                setPreRegistrationForm(prev => ({
+                    ...initialPreRegistrationFormState,
+                    referringAdminId: refAdminIdFromHash,
+                    referringAdminDisplayName: 'Error validating link',
+                    isReferralLinkValid: false
+                }));
+            });
+        }
         _setCurrentPageInternal(Page.PreRegistration);
         return;
       }
@@ -578,7 +607,14 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
     if (response && response.success && response.user) {
       setSuccessMessage("Pre-registration submitted successfully! Your account is pending administrator approval.");
-      setPreRegistrationForm(prev => ({ ...initialPreRegistrationFormState, referringAdminId: prev.referringAdminId, referringAdminDisplayName: prev.referringAdminDisplayName, isReferralLinkValid: prev.isReferralLinkValid }));
+      // Reset form but keep referral info for display if they stay on page
+      setPreRegistrationForm(prev => ({ 
+          ...initialPreRegistrationFormState, 
+          referringAdminId: prev.referringAdminId, 
+          referringAdminDisplayName: prev.referringAdminDisplayName, 
+          isReferralLinkValid: prev.isReferralLinkValid 
+      }));
+
 
       emailService.sendPreRegistrationSubmittedToUserEmail(response.user.email, response.user.displayName, preRegistrationForm.referringAdminDisplayName);
       // Backend should notify the specific referring admin

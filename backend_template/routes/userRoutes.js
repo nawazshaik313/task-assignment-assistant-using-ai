@@ -9,6 +9,30 @@ const { verifyToken, isAdmin } = require('../middleware/auth');
 const path = require('path');
 const emailService = require(path.join(__dirname, '../utils/emailService.js'));
 
+// New endpoint for validating admin referral ID
+router.get('/validate-admin-ref/:adminId', async (req, res) => {
+  try {
+    const adminId = req.params.adminId;
+    if (!mongoose.Types.ObjectId.isValid(adminId)) {
+      return res.json({ success: true, isValidRef: false, message: 'Invalid admin ID format.' });
+    }
+    const user = await User.findById(adminId);
+    if (user && user.role === 'admin' && user.organizationId) {
+      res.json({ 
+        success: true, 
+        isValidRef: true, 
+        displayName: user.displayName, 
+        organizationId: user.organizationId 
+      });
+    } else {
+      res.json({ success: true, isValidRef: false, message: 'Referring admin not found, is not an admin, or has no organization.' });
+    }
+  } catch (error) {
+    console.error("Error validating admin ref:", error);
+    res.status(500).json({ success: false, message: 'Server error during admin reference validation.' });
+  }
+});
+
 // User Registration
 router.post('/register', async (req, res) => {
   const { email, uniqueId, password, displayName, role, position, userInterests, phone, notificationPreference, referringAdminId, companyName } = req.body; // Changed organizationName to companyName
@@ -30,11 +54,11 @@ router.post('/register', async (req, res) => {
       organizationIdToSet = new mongoose.Types.ObjectId().toString(); // Generate unique Org ID
       newAdminCompanyName = companyName; // Use companyName for email
 
-      // Ensure no user (admin or otherwise) already exists with this email or uniqueId system-wide if it's a new admin
-      let existingUserGlobal = await User.findOne({ $or: [{ email: email.toLowerCase() }, { uniqueId }] });
-      if (existingUserGlobal) {
-        return res.status(400).json({ success: false, message: 'User with this email or unique ID already exists globally. Cannot register new admin.' });
-      }
+      // REMOVED GLOBAL CHECK:
+      // let existingUserGlobal = await User.findOne({ $or: [{ email: email.toLowerCase() }, { uniqueId }] });
+      // if (existingUserGlobal) {
+      //   return res.status(400).json({ success: false, message: 'User with this email or unique ID already exists globally. Cannot register new admin.' });
+      // }
 
     } else { // Role is 'user'
       if (req.body.organizationId) { // Admin creating user directly
@@ -77,6 +101,7 @@ router.post('/register', async (req, res) => {
     }
     
     if (!organizationIdToSet) { 
+        console.error("FATAL LOGIC ERROR: organizationIdToSet is undefined at critical point in /users/register. Request body:", req.body);
         return res.status(400).json({ success: false, message: 'Organization ID could not be determined for the user.' });
     }
 
@@ -106,7 +131,18 @@ router.post('/register', async (req, res) => {
     res.status(201).json({ success: true, message: 'User registered successfully.', user: newUser.toJSON() });
 
   } catch (error) {
-    console.error("User registration error object:", error); // Log the full error object
+    console.error("--- USER REGISTRATION ERROR ---");
+    console.error("Type:", error.name);
+    console.error("Message:", error.message);
+    console.error("Code:", error.code);
+    console.error("Stack Trace:", error.stack);
+    try {
+        console.error("Full Error Object (JSON):", JSON.stringify(error, Object.getOwnPropertyNames(error)));
+    } catch (e) {
+        console.error("Full Error Object (could not stringify):", error);
+    }
+    console.error("--- END USER REGISTRATION ERROR ---");
+
     if (error.code === 11000) { 
         return res.status(400).json({ success: false, message: 'Email or Unique ID already exists (unique constraint violation).' });
     } else if (error.name === 'ValidationError') {
@@ -116,7 +152,21 @@ router.post('/register', async (req, res) => {
         }
         return res.status(400).json({ success: false, message: 'Validation failed. Please check the provided data.', errors });
     }
-    res.status(500).json({ success: false, message: 'Server error during registration.', errorDetails: error.message });
+    
+    let detailedErrorMessage = `Server error during registration.`;
+    if (error.name) detailedErrorMessage += ` (Type: ${error.name})`;
+    // Avoid duplicating message if name and message are the same
+    if (error.message && error.name !== error.message && !detailedErrorMessage.includes(error.message)) {
+        detailedErrorMessage += ` Details: ${error.message}`;
+    }
+
+
+    res.status(500).json({ 
+        success: false, 
+        message: detailedErrorMessage,
+        errorType: error.name, 
+        errorCode: error.code,
+    });
   }
 });
 
@@ -347,7 +397,7 @@ router.post('/forgot-password', async (req, res) => {
             { expiresIn: '15m' }
         ); 
         
-        const resetLink = `${process.env.FRONTEND_URL}#PasswordReset?token=${resetToken}`;
+        const resetLink = `${process.env.FRONTEND_URL || 'about:blank'}#PasswordReset?token=${resetToken}`; // Use about:blank if FRONTEND_URL not set for safety
         
         emailService.sendPasswordResetEmail(user.email, user.displayName, resetLink)
           .catch(err => console.error("EmailJS Error (sendPasswordResetEmail):", err));

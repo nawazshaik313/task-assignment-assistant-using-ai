@@ -64,7 +64,7 @@ const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = ({
           </button>
         </div>
         <footer className="text-center py-6 text-sm text-neutral mt-auto">
-          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by SHAIK MOHAMMED.</p>
+          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by AI.</p>
         </footer>
       </div>
     );
@@ -85,7 +85,7 @@ const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = ({
           </button>
         </div>
         <footer className="text-center py-6 text-sm text-neutral mt-auto">
-          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by SHAIK MOHAMMED NAWAZ.</p>
+          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by AI.</p>
         </footer>
       </div>
     );
@@ -176,7 +176,8 @@ const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = ({
           </div>
           <button
             type="submit"
-            className="w-full py-3 px-4 bg-authButton hover:bg-authButtonHover text-textlight font-semibold rounded-md shadow-sm transition-colors text-sm"
+            className="w-full py-3 px-4 bg-authButton hover:bg-authButtonHover text-textlight font-semibold rounded-md shadow-sm transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={!formState.isReferralLinkValid}
           >
             Submit Pre-registration
           </button>
@@ -193,7 +194,7 @@ const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = ({
         </p>
       </div>
       <footer className="text-center py-6 text-sm text-neutral mt-auto">
-        <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by SHAIK MOHAMMED NAWAZ.</p>
+        <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by AI.</p>
       </footer>
     </div>
   );
