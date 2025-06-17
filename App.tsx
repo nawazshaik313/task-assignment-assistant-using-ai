@@ -255,6 +255,8 @@ export const App = (): JSX.Element => {
     }
   };
 
+  const adminExists = users.some(u => u.role === 'admin');
+
   const loadInitialData = useCallback(async (loggedInUser?: User) => {
     setIsLoadingAppData(true);
     try {
@@ -291,11 +293,14 @@ export const App = (): JSX.Element => {
         setPrograms(loadedPrograms || []);
         setAssignments(loadedAssignments || []);
         setAdminLogs(loadedAdminLogs || []);
-
-        if ((loadedUsers || []).length === 0 && activeUser.role !== 'admin') {
-            setNewRegistrationForm(prev => ({ ...prev, role: 'admin' }));
-        } else if ((loadedUsers || []).length > 0) {
-             setNewRegistrationForm(prev => ({ ...prev, role: 'user' }));
+        
+        // This logic seems to set role for the registration form based on whether users exist.
+        // It needs to be aware of the single admin rule.
+        const currentAdminExists = (loadedUsers || []).some(u => u.role === 'admin');
+        if (!currentAdminExists) {
+            setNewRegistrationForm(prev => ({ ...prev, role: 'admin' })); // Allows first user to be admin
+        } else {
+             setNewRegistrationForm(prev => ({ ...prev, role: 'user' })); // Subsequent users default to user
         }
 
       } else {
@@ -452,8 +457,14 @@ const handleNewRegistration = async (e: React.FormEvent) => {
     return;
   }
 
-  const isFirstUserScenario = users.length === 0 && pendingUsers.length === 0;
-  const roleToRegister = isFirstUserScenario ? 'admin' : 'user';
+  const isFirstPossibleAdmin = users.length === 0 && pendingUsers.length === 0 && !adminExists;
+  const roleToRegister = isFirstPossibleAdmin ? 'admin' : 'user';
+
+  if (roleToRegister === 'admin' && adminExists) {
+    // This case should ideally not be hit if UI is correct, but as a safeguard
+    setError("Cannot register as admin. An administrator account already exists.");
+    return;
+  }
 
   const registrationData = {
     displayName: name,
@@ -475,7 +486,7 @@ const handleNewRegistration = async (e: React.FormEvent) => {
     if (response && response.success && response.user) {
       if (roleToRegister === 'admin') {
         const createdAdmin = response.user as BackendUser;
-        setUsers(prev => [...prev, createdAdmin as User]);
+        setUsers(prev => [...prev, createdAdmin as User]); // Add to local users state
         setSuccessMessage("Admin account registered successfully! You can now log in.");
         emailService.sendWelcomeRegistrationEmail(createdAdmin.email, createdAdmin.displayName, createdAdmin.role);
       } else {
@@ -527,7 +538,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
   const newPendingUserData = {
     uniqueId, displayName, email, password,
-    role: 'user' as Role,
+    role: 'user' as Role, // Pre-registration always creates a 'user'
     referringAdminId: referringAdminId || undefined,
   };
 
@@ -688,6 +699,23 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         setError("Please enter a valid email address for the user."); return;
     }
 
+    const userBeingEdited = users.find(u => u.id === editingUserId);
+    if (!userBeingEdited) {
+        setError("User being edited not found.");
+        return;
+    }
+
+    // Single Admin Rule Checks
+    if (role === 'admin' && userBeingEdited.role !== 'admin' && adminExists) {
+        setError("Cannot promote to admin. Only one admin account is allowed.");
+        return;
+    }
+    if (userBeingEdited.role === 'admin' && role === 'user' && users.filter(u => u.role === 'admin').length <= 1) {
+        setError("Cannot demote the only administrator.");
+        return;
+    }
+
+
     const updatePayload: Partial<User> & { password?: string } = {
       email, uniqueId, displayName, position, userInterests, phone, notificationPreference, role,
     };
@@ -708,7 +736,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       if (response && response.success && response.user) {
         const baseUpdatedUser: User = { ...response.user, id: response.user.id || response.user._id!};
         setUsers(users.map(u => u.id === editingUserId ? baseUpdatedUser : u));
-        if(currentUser && currentUser.id === editingUserId) {
+        if(currentUser && currentUser.id === editingUserId) { // If admin updated their own details (e.g. name, not role)
             setCurrentUserInternal({...baseUpdatedUser, token: localStorage.getItem(JWT_TOKEN_KEY) || undefined });
         }
         setSuccessMessage(`User ${baseUpdatedUser.displayName} updated successfully!`);
@@ -732,6 +760,12 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         setError("Action not allowed or current user data is missing.");
         return;
     }
+     // Single Admin Rule Check
+    if (userForm.role === 'admin' && adminExists) {
+        setError("Cannot create a new admin. Only one admin account is allowed.");
+        return;
+    }
+
 
     const { email, uniqueId, displayName, position, userInterests, phone, notificationPreference, role, password, confirmPassword } = userForm;
 
@@ -776,13 +810,28 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     }
     clearMessages();
 
+    // Single Admin Rule Check for pending user approval
+    if ((userForm.role || approvingPendingUser.role) === 'admin' && adminExists) {
+        setError("Cannot approve as admin. Only one admin account is allowed. Please approve as User role.");
+        // Optionally, reset userForm.role to 'user' or handle this more gracefully
+        setUserForm(prev => ({...prev, role: 'user'})); // Force role to user in form
+        return; // Stop execution, let admin correct and resubmit or just inform.
+    }
+
     const approvalData = {
         position: userForm.position || 'Default Position',
         userInterests: userForm.userInterests || '',
         phone: userForm.phone || '',
         notificationPreference: userForm.notificationPreference || 'email',
-        role: userForm.role || approvingPendingUser.role,
+        // Use userForm.role if set, otherwise fallback to pendingUser's original role (which should be 'user' if admin exists)
+        role: (userForm.role === 'admin' && adminExists) ? 'user' : (userForm.role || approvingPendingUser.role),
     };
+    
+    // Final check on role before sending to backend
+    if (approvalData.role === 'admin' && adminExists) {
+        approvalData.role = 'user'; // Ensure it's user if an admin already exists
+    }
+
 
     try {
       const response = await fetchData<{ success: boolean; user: BackendUser; message?: string }>(`/pending-users/approve/${approvingPendingUser.id}`, {
@@ -833,7 +882,10 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     
     const userToDelete = users.find(u => u.id === userId);
     if (userToDelete && userToDelete.role === 'admin') {
-        setError("Cannot delete another admin account from this interface.");
+        // This check should ideally prevent deleting the sole admin.
+        // If multiple admins were possible, this would prevent deleting *any* admin.
+        // With single admin rule, this correctly prevents deleting the one admin.
+        setError("Cannot delete an administrator account.");
         return;
     }
 
@@ -1145,7 +1197,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       );
     }
 
-    const isPotentiallyFirstAdmin = users.length === 0 && pendingUsers.length === 0;
+    const isFirstPossibleAdmin = users.length === 0 && pendingUsers.length === 0 && !adminExists;
 
 
     return (
@@ -1184,9 +1236,9 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
               <div>
                   <label htmlFor="regRoleInfo" className="block text-sm font-medium text-textlight">Role</label>
-                  <input type="text" id="regRoleInfo" value={isPotentiallyFirstAdmin ? "Admin (Auto-assigned)" : "User (Pending Approval)"}  disabled className="mt-1 block w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-md shadow-sm"/>
+                  <input type="text" id="regRoleInfo" value={isFirstPossibleAdmin ? "Admin (Auto-assigned)" : "User (Pending Approval)"}  disabled className="mt-1 block w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-md shadow-sm"/>
                   <small className="text-xs text-gray-500">
-                    {isPotentiallyFirstAdmin ? "First user will be registered as Admin." : "General registration is for 'User' role and requires admin approval."}
+                    {isFirstPossibleAdmin ? "First user will be registered as Admin." : "General registration is for 'User' role and requires admin approval. Only one Admin account is allowed."}
                   </small>
               </div>
 
@@ -1201,7 +1253,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
               {authView === 'login' ? 'Register here' : 'Sign in here'}
             </button>
           </p>
-           { !isLoadingAppData && isPotentiallyFirstAdmin && authView === 'login' && (
+           { !isLoadingAppData && !adminExists && authView === 'login' && (
             <div className="mt-6 p-4 bg-yellow-50 border border-yellow-300 rounded-md">
               <p className="text-sm text-yellow-700">
                 <strong className="font-bold">First-time Setup:</strong> No admin accounts detected. The first user to register will become an administrator.
@@ -1303,7 +1355,37 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                   <FormTextarea label="Skills & Interests" id="userMgmtUserInterests" value={userForm.userInterests} onChange={e => setUserForm({...userForm, userInterests: e.target.value})} />
                   <FormInput label="Phone (Optional)" id="userMgmtPhone" type="tel" value={userForm.phone} onChange={e => setUserForm({...userForm, phone: e.target.value})} />
                   <FormSelect label="Notification Preference" id="userMgmtNotificationPreference" value={userForm.notificationPreference} onChange={e => setUserForm({...userForm, notificationPreference: e.target.value as NotificationPreference})}> <option value="email">Email</option> <option value="phone" disabled>Phone (Not Implemented)</option> <option value="none">None</option> </FormSelect>
-                  <FormSelect label="Role" id="userMgmtRole" value={userForm.role} onChange={e => setUserForm({...userForm, role: e.target.value as Role})}> <option value="user">User</option> <option value="admin">Admin</option> </FormSelect>
+                  
+                  <FormSelect 
+                    label="Role" 
+                    id="userMgmtRole" 
+                    value={userForm.role} 
+                    onChange={e => setUserForm({...userForm, role: e.target.value as Role})}
+                    // Disable changing role if editing the sole admin OR if approving a pending user and an admin already exists.
+                    disabled={
+                      (editingUserId && users.find(u => u.id === editingUserId)?.role === 'admin' && adminExists) ||
+                      (approvingPendingUser && adminExists && (userForm.role === 'admin' || approvingPendingUser.role === 'admin'))
+                    }
+                  >
+                    <option value="user">User</option>
+                    <option 
+                      value="admin"
+                      // Disable creating/promoting to admin if one already exists,
+                      // UNLESS we are editing the existing admin (then it should be selected and potentially disabled from changing).
+                      disabled={
+                          adminExists && 
+                          (!editingUserId || users.find(u => u.id === editingUserId)?.role !== 'admin') &&
+                          (!approvingPendingUser) // If approving, the outer select `disabled` handles it. This is for direct create/edit.
+                      }
+                    >
+                      Admin {adminExists && (!editingUserId || users.find(u => u.id === editingUserId)?.role !== 'admin') && !approvingPendingUser ? '(Not allowed, one admin exists)' : ''}
+                    </option>
+                  </FormSelect>
+                  {approvingPendingUser && adminExists && (userForm.role === 'admin' || approvingPendingUser.role === 'admin') && (
+                    <p className="text-xs text-warning">An admin already exists. This user will be approved with the 'User' role.</p>
+                  )}
+
+
                   {!approvingPendingUser && (
                     <div className="pt-4 border-t border-gray-200">
                         <h3 className="text-lg font-medium text-textlight mb-2">{editingUserId ? 'Reset Password (Optional)' : 'Set Password'}</h3>
@@ -1329,7 +1411,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-bground"> <tr> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Name</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Email / System ID</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Role / Date</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Actions</th> </tr> </thead>
                     <tbody className="bg-surface divide-y divide-gray-200">
-                      {pendingUsers.map(pu => ( <tr key={pu.id}> <td className="px-4 py-3 text-sm text-textlight">{pu.displayName}</td> <td className="px-4 py-3 text-sm text-textlight">{pu.email} ({pu.uniqueId})</td> <td className="px-4 py-3 text-sm text-textlight">{pu.role} <br/><span className="text-xs text-neutral">{new Date(pu.submissionDate).toLocaleDateString()}</span></td> <td className="px-4 py-3 text-sm space-x-2"> <button onClick={() => { setApprovingPendingUser(pu); setUserForm({ email: pu.email, uniqueId: pu.uniqueId, displayName: pu.displayName, position: '', userInterests: '', phone: '', notificationPreference: 'email', role: pu.role, password: '', confirmPassword: '', referringAdminId: pu.referringAdminId || currentUser?.id || '' }); setEditingUserId(null); navigateTo(Page.UserManagement, {action: 'approveUser', userId: pu.id}); clearMessages(); }} className="btn-success text-xs px-2 py-1"> Approve </button> <button onClick={() => handleRejectPendingUser(pu.id)} className="btn-danger text-xs px-2 py-1">Reject</button> </td> </tr> ))}
+                      {pendingUsers.map(pu => ( <tr key={pu.id}> <td className="px-4 py-3 text-sm text-textlight">{pu.displayName}</td> <td className="px-4 py-3 text-sm text-textlight">{pu.email} ({pu.uniqueId})</td> <td className="px-4 py-3 text-sm text-textlight">{pu.role} <br/><span className="text-xs text-neutral">{new Date(pu.submissionDate).toLocaleDateString()}</span></td> <td className="px-4 py-3 text-sm space-x-2"> <button onClick={() => { setApprovingPendingUser(pu); setUserForm({ email: pu.email, uniqueId: pu.uniqueId, displayName: pu.displayName, position: '', userInterests: '', phone: '', notificationPreference: 'email', role: adminExists ? 'user' : pu.role, password: '', confirmPassword: '', referringAdminId: pu.referringAdminId || currentUser?.id || '' }); setEditingUserId(null); navigateTo(Page.UserManagement, {action: 'approveUser', userId: pu.id}); clearMessages(); }} className="btn-success text-xs px-2 py-1"> Approve </button> <button onClick={() => handleRejectPendingUser(pu.id)} className="btn-danger text-xs px-2 py-1">Reject</button> </td> </tr> ))}
                     </tbody>
                   </table>
                 </div>
