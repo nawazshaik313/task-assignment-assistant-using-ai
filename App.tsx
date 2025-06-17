@@ -3,8 +3,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Page, User, Role, Task, Assignment, Program, GeminiSuggestion, NotificationPreference, AssignmentStatus, PendingUser, AdminLogEntry } from './types';
 import useLocalStorage from './hooks/useLocalStorage';
 import { getAssignmentSuggestion } from './services/geminiService';
-import * as emailService from './src/utils/emailService'; // Corrected import path
-import { validatePassword } from './src/utils/validation';
+import * as emailService from './utils/emailService'; // Corrected import path
+import { validatePassword } from './utils/validation'; // Corrected import path
 // import * //as cloudDataService from './services/cloudDataService'; // Deactivated
 import LoadingSpinner from './components/LoadingSpinner';
 import { UsersIcon, ClipboardListIcon, LightBulbIcon, CheckCircleIcon, TrashIcon, PlusCircleIcon, KeyIcon, BriefcaseIcon, LogoutIcon, UserCircleIcon } from './components/Icons';
@@ -202,7 +202,7 @@ export const App = (): JSX.Element => {
     role: 'user' as Role,
     uniqueId: '',
     position: '',
-    organizationName: '', // For admin UI when creating new "site"
+    companyName: '', // For admin UI when creating new "site", changed from organizationName
   });
 
   const [adminRegistrationForm, setAdminRegistrationForm] = useState(initialAdminRegistrationState);
@@ -462,14 +462,14 @@ const handleNewRegistration = async (e: React.FormEvent) => {
   e.preventDefault();
   clearMessages();
 
-  const { name, email, password, confirmPassword, uniqueId, position, role, organizationName } = newRegistrationForm;
+  const { name, email, password, confirmPassword, uniqueId, position, role, companyName } = newRegistrationForm; // Changed organizationName to companyName
 
   if (!name.trim() || !email.trim() || !password.trim() || !confirmPassword.trim() || !uniqueId.trim()) {
     setError("Full Name, Email, Password, Confirm Password, and System ID are required.");
     return;
   }
-  if (role === 'admin' && !organizationName.trim()) {
-      setError("Organization Name is required when registering as an Administrator for a new site.");
+  if (role === 'admin' && !companyName.trim()) { // Changed organizationName to companyName
+      setError("Company Name is required when registering as an Administrator for a new site.");
       return;
   }
   if (!/\S+@\S+\.\S+/.test(email)) {
@@ -493,7 +493,7 @@ const handleNewRegistration = async (e: React.FormEvent) => {
     role: role,
     uniqueId,
     position: position || (role === 'admin' ? 'Administrator' : 'User Position'),
-    organizationName: role === 'admin' ? organizationName : undefined,
+    companyName: role === 'admin' ? companyName : undefined, // Changed organizationName to companyName
   };
 
   const endpoint = '/users/register';
@@ -508,13 +508,15 @@ const handleNewRegistration = async (e: React.FormEvent) => {
       const createdEntity = response.user;
 
       if ('role' in createdEntity && createdEntity.role === 'admin') { // Assuming BackendUser for admin
-         setSuccessMessage(`Administrator account for organization '${organizationName}' registered successfully! You can now log in.`);
+         setSuccessMessage(`Administrator account for company '${companyName}' registered successfully! You can now log in.`); // Changed organizationName to companyName
       } else { // Could be BackendPendingUser or BackendUser if auto-approved user
          setSuccessMessage(`User account for ${createdEntity.displayName} registered. If admin approval is needed, you'll be notified.`);
       }
 
-      emailService.sendWelcomeRegistrationEmail(createdEntity.email, createdEntity.displayName, createdEntity.role);
-      setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user', uniqueId: '', position: '', organizationName: '' });
+      // Pass companyName to email service if admin
+      const companyNameToEmail = role === 'admin' ? companyName : '';
+      emailService.sendWelcomeRegistrationEmail(createdEntity.email, createdEntity.displayName, createdEntity.role, companyNameToEmail); // Pass companyName
+      setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user', uniqueId: '', position: '', companyName: '' }); // Changed organizationName to companyName
       setAuthView('login');
     } else {
       setError(response?.message || "Registration failed. Please check details and try again.");
@@ -1220,10 +1222,10 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                 </AuthFormSelect>
               </div>
               {newRegistrationForm.role === 'admin' && (
-                <div> <label htmlFor="regOrgName" className="block text-sm font-medium text-textlight">Organization/Site Name</label> <AuthFormInput type="text" id="regOrgName" aria-label="Organization or Site Name" placeholder="Your Organization Name" value={newRegistrationForm.organizationName} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, organizationName: e.target.value })} required /> <small className="text-xs text-gray-500">This will be the name of your new, separate site.</small> </div>
+                <div> <label htmlFor="regCompanyName" className="block text-sm font-medium text-textlight">Company Name</label> <AuthFormInput type="text" id="regCompanyName" aria-label="Company Name" placeholder="Your Company Name" value={newRegistrationForm.companyName} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, companyName: e.target.value })} required /> <small className="text-xs text-gray-500">This will be the name of your new, separate company site.</small> </div>
               )}
                <small className="text-xs text-gray-500">
-                  {newRegistrationForm.role === 'admin' ? "Registering as an Administrator creates a new, isolated site." :
+                  {newRegistrationForm.role === 'admin' ? "Registering as an Administrator creates a new, isolated site for your company." :
                    "User accounts are typically created via pre-registration links from an existing site administrator."}
                 </small>
 
