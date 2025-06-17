@@ -1379,7 +1379,27 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-bground"> <tr> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Name</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Email / System ID</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Intended Role / Date</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Actions</th> </tr> </thead>
                     <tbody className="bg-surface divide-y divide-gray-200">
-                      {pendingUsers.map(pu => ( <tr key={pu.id}> <td className="px-4 py-3 text-sm text-textlight">{pu.displayName}</td> <td className="px-4 py-3 text-sm text-textlight">{pu.email} ({pu.uniqueId})</td> <td className="px-4 py-3 text-sm text-textlight">{pu.role} <br/><span className="text-xs text-neutral">{new Date(pu.submissionDate).toLocaleDateString()}</span></td> <td className="px-4 py-3 text-sm space-x-2"> <button onClick={() => { setApprovingPendingUser(pu); setUserForm({ email: pu.email, uniqueId: pu.uniqueId, displayName: pu.displayName, position: '', userInterests: '', phone: '', notificationPreference: 'email', role: 'user', password: '', confirmPassword: '', referringAdminId: pu.referringAdminId || currentUser?.id || '' }); setEditingUserId(null); navigateTo(Page.UserManagement, {action: 'approveUser', userId: pu.id}); clearMessages(); }} className="btn-success text-xs px-2 py-1"> Approve </button> <button onClick={() => handleRejectPendingUser(pu.id)} className="btn-danger text-xs px-2 py-1">Reject</button> </td> </tr> ))}
+                      {pendingUsers.map(pu => {
+                        const canApprove = !pu.referringAdminId || (pu.referringAdminId && currentUser && currentUser.id === pu.referringAdminId);
+                        return (
+                          <tr key={pu.id}>
+                            <td className="px-4 py-3 text-sm text-textlight">{pu.displayName}</td>
+                            <td className="px-4 py-3 text-sm text-textlight">{pu.email} ({pu.uniqueId})</td>
+                            <td className="px-4 py-3 text-sm text-textlight">{pu.role} <br/><span className="text-xs text-neutral">{new Date(pu.submissionDate).toLocaleDateString()}</span></td>
+                            <td className="px-4 py-3 text-sm space-x-2">
+                              <button
+                                onClick={() => { setApprovingPendingUser(pu); setUserForm({ email: pu.email, uniqueId: pu.uniqueId, displayName: pu.displayName, position: '', userInterests: '', phone: '', notificationPreference: 'email', role: 'user', password: '', confirmPassword: '', referringAdminId: pu.referringAdminId || currentUser?.id || '' }); setEditingUserId(null); navigateTo(Page.UserManagement, {action: 'approveUser', userId: pu.id}); clearMessages(); }}
+                                className={`btn-success text-xs px-2 py-1 ${!canApprove ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                disabled={!canApprove}
+                                title={!canApprove ? "Approval restricted to the referring admin or for general registrations." : "Approve this user"}
+                              >
+                                Approve
+                              </button>
+                              <button onClick={() => handleRejectPendingUser(pu.id)} className="btn-danger text-xs px-2 py-1">Reject</button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
