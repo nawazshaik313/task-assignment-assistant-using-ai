@@ -17,10 +17,17 @@ const API_BASE_URL = 'https://task-management-backend-17a5.onrender.com';
 const JWT_TOKEN_KEY = 'task-assign-jwt';
 
 // --- START OF NEW AUTH FORM COMPONENTS ---
-const AuthFormInput: React.FC<React.InputHTMLAttributes<HTMLInputElement> & { id: string; 'aria-label': string }> = ({ id, ...props }) => (
+const AuthFormInput: React.FC<React.InputHTMLAttributes<HTMLInputElement> & { 
+  id: string; 
+  'aria-label': string;
+  value: string; // Explicitly define value
+  onChange: (event: React.ChangeEvent<HTMLInputElement>) => void; // Explicitly define onChange
+}> = ({ id, value, onChange, ...props }) => ( // Destructure value and onChange
   <input
     id={id}
-    {...props}
+    value={value} // Pass explicitly
+    onChange={onChange} // Pass explicitly
+    {...props} // Spread other props like type, placeholder, required, etc.
     className="w-full p-3 bg-authFormBg border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm text-textlight placeholder-neutral"
   />
 );
