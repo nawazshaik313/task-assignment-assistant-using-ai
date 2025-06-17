@@ -204,9 +204,9 @@ export const App = (): JSX.Element => {
     email: '',
     password: '',
     confirmPassword: '',
-    role: 'user' as Role, // Default, might be overridden for first admin
-    uniqueId: '', // Added for registration form
-    position: '', // Added
+    role: 'user' as Role, // Default role for new registrations
+    uniqueId: '', 
+    position: '', 
   });
 
   const [adminRegistrationForm, setAdminRegistrationForm] = useState(initialAdminRegistrationState);
@@ -216,7 +216,7 @@ export const App = (): JSX.Element => {
       email: '', uniqueId: '', password: '', confirmPassword: '',
       displayName: '', position: '', userInterests: '',
       phone: '', notificationPreference: 'none' as NotificationPreference,
-      role: 'user' as Role, // Always default to 'user' for forms initiated by admin
+      role: 'user' as Role, 
       referringAdminId: ''
   };
   const [userForm, setUserForm] = useState<typeof initialUserFormData>(initialUserFormData);
@@ -256,8 +256,6 @@ export const App = (): JSX.Element => {
     }
   };
 
-  // This should be derived from `users` state directly when needed.
-  // const adminExists = users.some(u => u.role === 'admin');
   const getAdminExists = () => users.some(u => u.role === 'admin');
 
 
@@ -300,26 +298,21 @@ export const App = (): JSX.Element => {
         setAdminLogs(loadedAdminLogs || []);
         
       } else {
-        // Attempt to fetch users even if not logged in to check for admin existence for registration form
-        // This is a simplified approach. A dedicated backend endpoint might be better.
-        const allUsersResponse = await fetchData<User[]>('/users/all-for-status-check', {}, []); // Hypothetical endpoint
+        // No user logged in, fetch all users only to check if any admin exists for initial setup guidance
+        // This is a minimal fetch for that purpose.
+        const allUsersResponse = await fetchData<User[]>('/users/all-for-status-check', {}, []); 
         loadedUsersData = allUsersResponse || [];
-        setUsers(loadedUsersData);
-
-        setPendingUsers([]);
-        setTasks([]);
-        setPrograms([]);
-        setAssignments([]);
-        setAdminLogs([]);
+        setUsers(loadedUsersData); // Store this minimal list for getAdminExists()
+        setPendingUsers([]); setTasks([]); setPrograms([]); setAssignments([]); setAdminLogs([]);
       }
       
-      const currentAdminExists = loadedUsersData.some(u => u.role === 'admin');
-      if (!currentAdminExists) {
+      // Update newRegistrationForm role based on admin existence (for initial setup guidance)
+      // This doesn't prevent creating admins if the form allows it.
+      if (!loadedUsersData.some(u => u.role === 'admin')) {
           setNewRegistrationForm(prev => ({ ...prev, role: 'admin' })); 
       } else {
-            setNewRegistrationForm(prev => ({ ...prev, role: 'user' }));
+          setNewRegistrationForm(prev => ({ ...prev, role: 'user' })); // Default new users to 'user' role
       }
-
 
       console.log("Initial data processed based on user session.");
     } catch (err: any) {
@@ -333,19 +326,18 @@ export const App = (): JSX.Element => {
     } finally {
       setIsLoadingAppData(false);
     }
-  }, []); // Removed navigateTo from dependencies as it causes issues here.
+  }, []); 
 
   useEffect(() => {
     loadInitialData();
   }, [loadInitialData]);
 
 
-  // Wrapper for setPreRegistrationForm to persist to localStorage
   const setPreRegistrationForm = (value: React.SetStateAction<typeof initialPreRegistrationFormState>) => {
     setPreRegistrationFormInternal(value);
   };
 
-  const navigateTo = useCallback((page: Page, params?: Record<string, string>) => { let hash = `#${page}`; if (params && Object.keys(params).length > 0) { hash += `?${new URLSearchParams(params).toString()}`; } if (window.location.hash !== hash) { window.location.hash = hash; } else { _setCurrentPageInternal(page); /* Ensure internal state updates if hash is same */ } }, []);
+  const navigateTo = useCallback((page: Page, params?: Record<string, string>) => { let hash = `#${page}`; if (params && Object.keys(params).length > 0) { hash += `?${new URLSearchParams(params).toString()}`; } if (window.location.hash !== hash) { window.location.hash = hash; } else { _setCurrentPageInternal(page); } }, []);
 
   useEffect(() => {
     if (isLoadingAppData && !currentUser) return;
@@ -359,15 +351,13 @@ export const App = (): JSX.Element => {
 
       if (targetPageFromHashPath === Page.PreRegistration) {
         const refAdminIdFromHash = params.get('refAdminId');
-        // Fetch users to verify admin only if users array is empty or stale. 
-        // Small optimization: If users array is populated, use it directly.
         const adminUser = users.find(u => u.id === refAdminIdFromHash && u.role === 'admin');
 
         setPreRegistrationForm(prev => ({
           ...initialPreRegistrationFormState,
           referringAdminId: refAdminIdFromHash || '',
           referringAdminDisplayName: adminUser ? adminUser.displayName : (refAdminIdFromHash ? `Admin ID: ${refAdminIdFromHash}`: 'an administrator'),
-          isReferralLinkValid: !!refAdminIdFromHash && !!adminUser // Link valid only if refAdminId exists AND is an admin
+          isReferralLinkValid: !!refAdminIdFromHash && !!adminUser 
         }));
         if (!refAdminIdFromHash || !adminUser) {
           setError("Pre-registration link is invalid, missing administrator reference, or the referring admin is no longer valid.");
@@ -384,7 +374,6 @@ export const App = (): JSX.Element => {
         return;
       }
 
-      // User is logged in
       const defaultPageDetermination = currentUser.role === 'admin' ? Page.Dashboard : Page.ViewAssignments;
       let newPage = (Object.values(Page).includes(targetPageFromHashPath as Page) ? targetPageFromHashPath : defaultPageDetermination) as Page;
 
@@ -429,7 +418,7 @@ export const App = (): JSX.Element => {
         userInterests: currentUser.userInterests || '',
         phone: currentUser.phone || '',
         notificationPreference: currentUser.notificationPreference || 'none',
-        role: currentUser.role, // This will be 'admin' or 'user'
+        role: currentUser.role,
         password: '',
         confirmPassword: '',
         referringAdminId: currentUser.referringAdminId || ''
@@ -442,15 +431,16 @@ export const App = (): JSX.Element => {
       const refAdmin = users.find(u => u.id === referringAdminId && u.role === 'admin');
       if (refAdmin) return refAdmin;
     }
-    return users.find(u => u.role === 'admin');
+    // Fallback to any admin if specific one not found or not provided.
+    // In a multi-tenant system, this might need refinement to target the correct organizational admin.
+    return users.find(u => u.role === 'admin'); 
   }, [users]);
 
 const handleNewRegistration = async (e: React.FormEvent) => {
   e.preventDefault();
   clearMessages();
 
-  const { name, email, password, confirmPassword, uniqueId, position } = newRegistrationForm;
-  const adminExists = getAdminExists();
+  const { name, email, password, confirmPassword, uniqueId, position, role } = newRegistrationForm;
 
   if (!name.trim() || !email.trim() || !password.trim() || !confirmPassword.trim() || !uniqueId.trim()) {
     setError("Full Name, Email, Password, Confirm Password, and System ID are required.");
@@ -470,24 +460,23 @@ const handleNewRegistration = async (e: React.FormEvent) => {
     return;
   }
 
-  const isFirstPossibleAdmin = !adminExists; // Simplified check
-  const roleToRegister = isFirstPossibleAdmin ? 'admin' : 'user';
-
-  if (roleToRegister === 'admin' && adminExists) {
-    setError("Cannot register as admin. An administrator account already exists.");
-    return;
-  }
-
+  // Role is now taken directly from the form. Backend will handle admin creation logic.
   const registrationData = {
     displayName: name,
     email,
     password,
-    role: roleToRegister,
+    role: role, // Role selected in the form
     uniqueId,
-    position: position || (roleToRegister === 'admin' ? 'Administrator' : 'User Position'),
+    position: position || (role === 'admin' ? 'Administrator' : 'User Position'),
   };
 
-  const endpoint = roleToRegister === 'admin' ? '/users/register' : '/pending-users';
+  // Endpoint choice might depend on whether it's an admin or user registration
+  // For simplicity, using one endpoint and letting backend decide based on role.
+  // Or, use /users/register for direct user/admin creation and /pending-users for users needing approval.
+  // Let's assume /users/register can handle both if backend is adjusted.
+  // If role is 'user', it might still go to /pending-users if that's the desired flow.
+  const endpoint = role === 'admin' ? '/users/register' : '/pending-users';
+
 
   try {
     const response = await fetchData<{ success: boolean; user: BackendUser | BackendPendingUser; message?: string }>(endpoint, {
@@ -496,12 +485,12 @@ const handleNewRegistration = async (e: React.FormEvent) => {
     });
 
     if (response && response.success && response.user) {
-      if (roleToRegister === 'admin') {
-        const createdAdmin = response.user as BackendUser;
-        setUsers(prev => [...prev, createdAdmin as User]); // Add to local users state
-        setSuccessMessage("Admin account registered successfully! You can now log in.");
-        emailService.sendWelcomeRegistrationEmail(createdAdmin.email, createdAdmin.displayName, createdAdmin.role);
-      } else {
+      if (endpoint === '/users/register') { // Directly created user (likely an admin or first user)
+        const createdUser = response.user as BackendUser;
+        setUsers(prev => [...prev, createdUser as User]); 
+        setSuccessMessage(`${createdUser.role === 'admin' ? 'Admin' : 'User'} account registered successfully! You can now log in.`);
+        emailService.sendWelcomeRegistrationEmail(createdUser.email, createdUser.displayName, createdUser.role);
+      } else { // Went to pending users
         const createdPendingUser = response.user as BackendPendingUser;
         setPendingUsers(prev => [...prev, createdPendingUser as PendingUser]);
         setSuccessMessage("Registration submitted! Your account is pending administrator approval.");
@@ -550,7 +539,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
   const newPendingUserData = {
     uniqueId, displayName, email, password,
-    role: 'user' as Role, // Pre-registration always creates a 'user'
+    role: 'user' as Role, 
     referringAdminId: referringAdminId || undefined,
   };
 
@@ -602,7 +591,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       if (response && response.success && response.user && response.token) {
         const loggedInUserWithToken: User = {
           ...response.user,
-          id: response.user.id || response.user._id!, // Ensure id is correctly assigned
+          id: response.user.id || response.user._id!, 
           token: response.token
         };
         setCurrentUser(loggedInUserWithToken);
@@ -702,7 +691,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     clearMessages();
     if (!editingUserId || !currentUser || currentUser.role !== 'admin') return;
 
-    const { email, uniqueId, displayName, position, userInterests, phone, notificationPreference, password, confirmPassword } = userForm;
+    const { email, uniqueId, displayName, position, userInterests, phone, notificationPreference, password, confirmPassword, role } = userForm;
 
     if (!email.trim() || !uniqueId.trim() || !displayName.trim() || !position.trim()) {
         setError("Email, System ID, Display Name, and Position are required."); return;
@@ -711,14 +700,8 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         setError("Please enter a valid email address for the user."); return;
     }
 
-    const userBeingEdited = users.find(u => u.id === editingUserId);
-    if (!userBeingEdited) { setError("User being edited not found."); return; }
-    if (userBeingEdited.role === 'admin') { setError("Administrator account cannot be edited here. Use My Profile."); return; }
-
-
     const updatePayload: Partial<User> & { password?: string } = {
-      email, uniqueId, displayName, position, userInterests, phone, notificationPreference,
-      role: 'user', // Forcibly set role to 'user' as admin cannot promote/change role to admin here
+      email, uniqueId, displayName, position, userInterests, phone, notificationPreference, role
     };
 
     if (password) {
@@ -739,7 +722,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         setUsers(users.map(u => u.id === editingUserId ? baseUpdatedUser : u));
         setSuccessMessage(`User ${baseUpdatedUser.displayName} updated successfully!`);
         setEditingUserId(null); setUserForm(initialUserFormData);
-        await addAdminLogEntry(`Admin updated user profile for ${baseUpdatedUser.displayName}.`);
+        await addAdminLogEntry(`Admin updated user profile for ${baseUpdatedUser.displayName} (Role: ${baseUpdatedUser.role}).`);
         navigateTo(Page.UserManagement);
       } else {
         setError(response?.message || "Failed to update user.");
@@ -759,7 +742,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         return;
     }
 
-    const { email, uniqueId, displayName, position, userInterests, phone, notificationPreference, password, confirmPassword } = userForm;
+    const { email, uniqueId, displayName, position, userInterests, phone, notificationPreference, password, confirmPassword, role } = userForm;
 
     if (!email.trim() || !uniqueId.trim() || !displayName.trim() || !position.trim() || !password.trim() || !confirmPassword.trim()) {
         setError("Email, System ID, Display Name, Position, Password, and Confirm Password are required."); return;
@@ -771,13 +754,14 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
     const newUserData = {
       email, uniqueId, password, 
-      role: 'user' as Role, // Always create as 'user'
+      role: role, // Use role from form
       displayName, position, userInterests, phone, notificationPreference,
-      referringAdminId: currentUser.id
+      referringAdminId: currentUser.id // Admin creating the user
     };
 
     try {
-      const response = await fetchData<{ success: boolean; user: BackendUser; message?: string }>('/users/register', { // Using /users/register, backend must handle 'admin' role override if needed for first user
+      // Use /users/register, backend should allow admin to create other admins or users
+      const response = await fetchData<{ success: boolean; user: BackendUser; message?: string }>('/users/register', { 
         method: 'POST',
         body: JSON.stringify(newUserData),
       });
@@ -785,10 +769,10 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       if (response && response.success && response.user) {
         const createdUser: User = {...response.user, id: response.user.id || response.user._id!};
         setUsers(prev => [...prev, createdUser]);
-        setSuccessMessage(`User ${createdUser.displayName} created successfully!`);
+        setSuccessMessage(`User ${createdUser.displayName} (Role: ${createdUser.role}) created successfully!`);
         setUserForm(initialUserFormData);
         emailService.sendWelcomeRegistrationEmail(createdUser.email, createdUser.displayName, createdUser.role);
-        await addAdminLogEntry(`Admin created new user: ${createdUser.displayName}, Role: User.`);
+        await addAdminLogEntry(`Admin created new user: ${createdUser.displayName}, Role: ${createdUser.role}.`);
         navigateTo(Page.UserManagement);
       } else {
         setError(response?.message || "Failed to create user.");
@@ -804,12 +788,16 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     }
     clearMessages();
 
+    // Role for approved user; backend should respect this if valid (e.g., can't make everyone admin if policy exists)
+    // For now, let's assume the pending user's intended role is what we try to approve, or 'user' by default.
+    const roleToApprove = approvingPendingUser.role || 'user';
+
     const approvalData = {
         position: userForm.position || 'Default Position',
         userInterests: userForm.userInterests || '',
         phone: userForm.phone || '',
         notificationPreference: userForm.notificationPreference || 'email',
-        role: 'user' as Role, // Always approve as 'user'
+        role: roleToApprove, 
     };
     
     try {
@@ -824,10 +812,10 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         setPendingUsers(prev => prev.filter(pu => pu.id !== approvingPendingUser.id));
 
         setApprovingPendingUser(null); setUserForm(initialUserFormData);
-        setSuccessMessage(`User ${createdUser.displayName} approved and account activated!`);
+        setSuccessMessage(`User ${createdUser.displayName} approved (Role: ${createdUser.role}) and account activated!`);
 
         emailService.sendAccountActivatedByAdminEmail(createdUser.email, createdUser.displayName, currentUser.displayName);
-        await addAdminLogEntry(`Admin approved pending user: ${createdUser.displayName} as User.`);
+        await addAdminLogEntry(`Admin approved pending user: ${createdUser.displayName} as ${createdUser.role}.`);
       } else {
         setError(response?.message || "Failed to approve user.");
       }
@@ -860,10 +848,12 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     if (currentUser.id === userId) { setError("Admins cannot delete their own accounts."); return; }
     
     const userToDelete = users.find(u => u.id === userId);
-    if (userToDelete && userToDelete.role === 'admin') {
-        setError("Cannot delete an administrator account using this function.");
-        return;
-    }
+    // Modified: Allow admin to delete other admins if needed, but with caution.
+    // The sole admin check should be on backend.
+    // if (userToDelete && userToDelete.role === 'admin') {
+    //     setError("Cannot delete an administrator account using this function.");
+    //     return;
+    // }
 
     clearMessages();
     try {
@@ -1173,8 +1163,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       );
     }
 
-    const adminExists = getAdminExists();
-    const isFirstPossibleAdmin = !adminExists;
+    const anyAdminExists = getAdminExists(); // Used for UI hints about first admin setup
 
 
     return (
@@ -1212,10 +1201,14 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
               <div> <label htmlFor="regConfirmPassword" className="block text-sm font-medium text-textlight">Confirm Password</label> <AuthFormInput type="password" id="regConfirmPassword" aria-label="Confirm password for registration" placeholder="Confirm your password" value={newRegistrationForm.confirmPassword} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, confirmPassword: e.target.value })} required autoComplete="new-password" /> </div>
 
               <div>
-                  <label htmlFor="regRoleInfo" className="block text-sm font-medium text-textlight">Role</label>
-                  <input type="text" id="regRoleInfo" value={isFirstPossibleAdmin ? "Admin (Auto-assigned)" : "User (Pending Approval)"}  readOnly className="mt-1 block w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-md shadow-sm text-gray-700"/>
-                  <small className="text-xs text-gray-500">
-                    {isFirstPossibleAdmin ? "First user will be registered as Admin." : "General registration is for 'User' role and requires admin approval. Only one Admin account is allowed."}
+                <label htmlFor="regRole" className="block text-sm font-medium text-textlight">Register as</label>
+                <AuthFormSelect id="regRole" aria-label="Select role for registration" value={newRegistrationForm.role} onChange={(e) => setNewRegistrationForm({...newRegistrationForm, role: e.target.value as Role})}>
+                  <option value="user">User (requires admin approval)</option>
+                  <option value="admin">Administrator</option>
+                </AuthFormSelect>
+                 <small className="text-xs text-gray-500">
+                    {!anyAdminExists && newRegistrationForm.role === 'admin' ? "First administrator account setup." : 
+                     (newRegistrationForm.role === 'admin' ? "Registering as an additional Administrator." : "User accounts require administrator approval.")}
                   </small>
               </div>
 
@@ -1230,11 +1223,11 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
               {authView === 'login' ? 'Register here' : 'Sign in here'}
             </button>
           </p>
-           { !isLoadingAppData && isFirstPossibleAdmin && authView === 'login' && (
+           { !isLoadingAppData && !anyAdminExists && authView === 'login' && (
             <div className="mt-6 p-4 bg-yellow-50 border border-yellow-300 rounded-md">
               <p className="text-sm text-yellow-700">
                 <strong className="font-bold">First-time Setup:</strong> No admin accounts detected. The first user to register will become an administrator.
-                Please <button type="button" onClick={() => { clearMessages(); setAuthView('register'); }} className="font-medium text-authLink hover:underline">register as Admin</button>.
+                Please <button type="button" onClick={() => { clearMessages(); setNewRegistrationForm(prev => ({...prev, role: 'admin'})); setAuthView('register'); }} className="font-medium text-authLink hover:underline">register as Admin</button>.
               </p>
             </div>
           )}
@@ -1323,7 +1316,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
             {editingUserId || approvingPendingUser || new URLSearchParams(window.location.hash.split('?')[1]).get('action') === 'createUser' ? (
               <div className="bg-surface p-6 rounded-lg shadow-md">
-                <h3 className="text-xl font-semibold text-accent mb-4"> {editingUserId ? 'Edit User' : (approvingPendingUser ? `Approve: ${approvingPendingUser.displayName}` : 'Create New User')} </h3>
+                <h3 className="text-xl font-semibold text-accent mb-4"> {editingUserId ? `Edit User: ${users.find(u=>u.id===editingUserId)?.displayName || ''}` : (approvingPendingUser ? `Approve: ${approvingPendingUser.displayName}` : 'Create New User')} </h3>
                 <form onSubmit={editingUserId ? handleAdminUpdateUser : (approvingPendingUser ? handleApprovePendingUser : handleCreateUserByAdmin)} className="space-y-4">
                   <FormInput label="Email" id="userMgmtEmail" type="email" value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} required />
                   <FormInput label="System ID / Username" id="userMgmtUniqueId" type="text" value={userForm.uniqueId} onChange={e => setUserForm({...userForm, uniqueId: e.target.value})} required />
@@ -1333,26 +1326,12 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                   <FormInput label="Phone (Optional)" id="userMgmtPhone" type="tel" value={userForm.phone} onChange={e => setUserForm({...userForm, phone: e.target.value})} />
                   <FormSelect label="Notification Preference" id="userMgmtNotificationPreference" value={userForm.notificationPreference} onChange={e => setUserForm({...userForm, notificationPreference: e.target.value as NotificationPreference})}> <option value="email">Email</option> <option value="phone" disabled>Phone (Not Implemented)</option> <option value="none">None</option> </FormSelect>
                   
-                  <div>
-                    <label htmlFor="userMgmtRoleDisplay" className="block text-sm font-medium text-textlight">Role</label>
-                    <input 
-                      type="text" 
-                      id="userMgmtRoleDisplay" 
-                      value="User" 
-                      readOnly 
-                      disabled 
-                      className="mt-1 block w-full px-3 py-2 bg-gray-100 border-gray-300 rounded-md shadow-sm text-gray-700"
-                    />
-                     {(editingUserId && users.find(u => u.id === editingUserId)?.role === 'admin') && 
-                        <p className="mt-1 text-xs text-neutral">Admin role cannot be changed here. Use My Profile for own details.</p>
-                     }
-                     {(!editingUserId && !approvingPendingUser) &&
-                        <p className="mt-1 text-xs text-neutral">New users are created with the 'User' role.</p>
-                     }
-                     {approvingPendingUser &&
-                        <p className="mt-1 text-xs text-neutral">Pending users are approved with the 'User' role.</p>
-                     }
-                  </div>
+                  <FormSelect label="Role" id="userMgmtRole" value={userForm.role} onChange={e => setUserForm({...userForm, role: e.target.value as Role})} disabled={!!approvingPendingUser}>
+                     <option value="user">User</option>
+                     <option value="admin">Administrator</option>
+                  </FormSelect>
+                   {approvingPendingUser && <p className="text-xs text-neutral">Role for pending user is typically 'user' upon approval. Backend may enforce policies.</p>}
+
 
                   {!approvingPendingUser && (
                     <div className="pt-4 border-t border-gray-200">
@@ -1380,7 +1359,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                     <thead className="bg-bground"> <tr> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Name</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Email / System ID</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Intended Role / Date</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Actions</th> </tr> </thead>
                     <tbody className="bg-surface divide-y divide-gray-200">
                       {pendingUsers.map(pu => {
-                        const canApprove = !pu.referringAdminId || (pu.referringAdminId && currentUser && currentUser.id === pu.referringAdminId);
+                        const canApprove = !pu.referringAdminId || (pu.referringAdminId && currentUser && currentUser.id === pu.referringAdminId) || currentUser.role === 'admin'; // General admin can approve if no specific referrer or is the referrer
                         return (
                           <tr key={pu.id}>
                             <td className="px-4 py-3 text-sm text-textlight">{pu.displayName}</td>
@@ -1388,10 +1367,10 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                             <td className="px-4 py-3 text-sm text-textlight">{pu.role} <br/><span className="text-xs text-neutral">{new Date(pu.submissionDate).toLocaleDateString()}</span></td>
                             <td className="px-4 py-3 text-sm space-x-2">
                               <button
-                                onClick={() => { setApprovingPendingUser(pu); setUserForm({ email: pu.email, uniqueId: pu.uniqueId, displayName: pu.displayName, position: '', userInterests: '', phone: '', notificationPreference: 'email', role: 'user', password: '', confirmPassword: '', referringAdminId: pu.referringAdminId || currentUser?.id || '' }); setEditingUserId(null); navigateTo(Page.UserManagement, {action: 'approveUser', userId: pu.id}); clearMessages(); }}
+                                onClick={() => { setApprovingPendingUser(pu); setUserForm({ email: pu.email, uniqueId: pu.uniqueId, displayName: pu.displayName, position: '', userInterests: '', phone: '', notificationPreference: 'email', role: pu.role, password: '', confirmPassword: '', referringAdminId: pu.referringAdminId || currentUser?.id || '' }); setEditingUserId(null); navigateTo(Page.UserManagement, {action: 'approveUser', userId: pu.id}); clearMessages(); }}
                                 className={`btn-success text-xs px-2 py-1 ${!canApprove ? 'opacity-50 cursor-not-allowed' : ''}`}
                                 disabled={!canApprove}
-                                title={!canApprove ? "Approval restricted to the referring admin or for general registrations." : "Approve this user"}
+                                title={!canApprove ? "Approval restricted." : "Approve this user"}
                               >
                                 Approve
                               </button>
@@ -1414,11 +1393,11 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                     <thead className="bg-bground"> <tr> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Name</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Email / System ID</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Role / Position</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Actions</th> </tr> </thead>
                     <tbody className="bg-surface divide-y divide-gray-200">
                       {users.map(user => ( <tr key={user.id}> <td className="px-4 py-3 text-sm font-medium text-textlight">{user.displayName}</td> <td className="px-4 py-3 text-sm text-textlight">{user.email}<br/><span className="text-xs text-neutral">{user.uniqueId}</span></td> <td className="px-4 py-3 text-sm text-textlight capitalize">{user.role}<br/><span className="text-xs text-neutral">{user.position}</span></td> <td className="px-4 py-3 text-sm space-x-2"> 
-                        {currentUser.id !== user.id && user.role !== 'admin' && (
-                            <button onClick={() => { setEditingUserId(user.id); setUserForm({ email: user.email, uniqueId: user.uniqueId, displayName: user.displayName, position: user.position, userInterests: user.userInterests || '', phone: user.phone || '', notificationPreference: user.notificationPreference || 'none', role: 'user', password: '', confirmPassword: '', referringAdminId: user.referringAdminId || '' }); setApprovingPendingUser(null); navigateTo(Page.UserManagement, {action: 'editUser', userId: user.id}); clearMessages(); }} className="btn-info text-xs px-2 py-1"> Edit </button> 
+                        {currentUser.id !== user.id && ( // Admins can edit other users, including other admins (profile details, not necessarily cross-tenant data)
+                            <button onClick={() => { setEditingUserId(user.id); setUserForm({ email: user.email, uniqueId: user.uniqueId, displayName: user.displayName, position: user.position, userInterests: user.userInterests || '', phone: user.phone || '', notificationPreference: user.notificationPreference || 'none', role: user.role, password: '', confirmPassword: '', referringAdminId: user.referringAdminId || '' }); setApprovingPendingUser(null); navigateTo(Page.UserManagement, {action: 'editUser', userId: user.id}); clearMessages(); }} className="btn-info text-xs px-2 py-1"> Edit </button> 
                         )}
-                        {currentUser.id !== user.id && user.role !== 'admin' && ( 
-                          <button onClick={() => handleDeleteUser(user.id)} className="btn-danger text-xs px-2 py-1">Delete</button> 
+                        {currentUser.id !== user.id && ( // Keep deletion of admins restrictive, or rely on backend policy
+                          <button onClick={() => handleDeleteUser(user.id)} className={`btn-danger text-xs px-2 py-1 ${user.role === 'admin' ? 'opacity-50 cursor-not-allowed' : ''}`} disabled={user.role === 'admin'} title={user.role === 'admin' ? "Deleting admin accounts has significant impact. Confirm policy." : "Delete user"}>Delete</button> 
                         )} 
                         {currentUser.id === user.id && (
                            <button onClick={() => navigateTo(Page.UserProfile)} className="btn-neutral text-xs px-2 py-1">My Profile</button>
@@ -1477,7 +1456,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                     return ( <li key={`${assignment.taskId}-${assignment.personId}`} className="bg-surface p-4 rounded-lg shadow-md"> <h3 className={`text-lg font-semibold ${isLate && !isSubmittedLate ? 'text-danger' : 'text-textlight'}`}>{assignment.taskTitle}</h3> {currentUser.role === 'admin' && <p className="text-sm text-neutral">To: <strong>{assignment.personName}</strong></p>} <p className="text-xs text-neutral mt-1">Status: <span className={`font-medium ${assignment.status==='completed_admin_approved'?'text-success':assignment.status==='declined_by_user'?'text-danger':assignment.status.startsWith('submitted')?'text-info':assignment.status==='pending_acceptance'?'text-warning':'text-blue-500' }`}>{assignment.status.replace(/_/g,' ')}</span> {isLate && !isSubmittedLate && <span className="text-danger text-xs font-bold ml-2">(OVERDUE)</span>} {isSubmittedLate && <span className="text-warning text-xs font-bold ml-2">(LATE)</span>} </p> {task && <p className="text-sm text-neutral mt-1">{task.description}</p>} {task?.requiredSkills && <p className="text-xs">Skills: {task.requiredSkills}</p>} {assignment.deadline && <p className="text-xs">Deadline: {new Date(assignment.deadline).toLocaleDateString()}</p>} {assignment.justification && assignment.justification !== 'Manually assigned by admin.' && <p className="text-xs italic">AI: {assignment.justification}</p>} {assignment.userSubmissionDate && <p className="text-xs">Submitted: {new Date(assignment.userSubmissionDate).toLocaleString()}</p>} {assignment.userDelayReason && <p className="text-xs">Delay reason: {assignment.userDelayReason}</p>}
                         <div className="mt-3 pt-3 border-t border-gray-200 space-x-2 flex flex-wrap gap-y-2">
                           {assignment.status === 'pending_acceptance' && assignment.personId === currentUser.id && ( <> <button onClick={() => handleUserAcceptTask(assignment.taskId)} className="btn-success text-sm">Accept</button> <button onClick={() => handleUserDeclineTask(assignment.taskId)} className="btn-danger text-sm">Decline</button> </> )}
-                          {assignment.status === 'accepted_by_user' && assignment.personId === currentUser.id && ( <> {isLate && assignmentToSubmitDelayReason !== `${assignment.taskId}-${assignment.personId}` && ( <button onClick={() => setAssignmentToSubmitDelayReason(`${assignment.taskId}-${assignment.personId}`)} className="btn-warning text-sm">Submit Late</button> )} {assignmentToSubmitDelayReason === `${assignment.taskId}-${assignment.personId}` && isLate && ( <div className="w-full space-y-2 my-2 p-2 border border-warning bg-yellow-50"> <FormTextarea label="Reason for Late Submission:" id={`delayReason-${assignment.taskId}`} value={userSubmissionDelayReason} onChange={e => setUserSubmissionDelayReason(e.target.value)} /> <button onClick={() => handleUserSubmitTask(assignment.taskId, userSubmissionDelayReason)} className="btn-primary text-sm">Confirm</button> <button onClick={() => { setAssignmentToSubmitDelayReason(null); setUserSubmissionDelayReason(''); }} className="btn-neutral text-sm ml-2">Cancel</button> </div> )} {!isLate && ( <button onClick={() => handleUserSubmitTask(assignment.taskId)} className="btn-primary text-sm">Mark Completed</button> )} </> )}
+                          {assignment.status === 'accepted_by_user' && assignment.personId === currentUser.id && ( <> {isLate && assignmentToSubmitDelayReason !== `${assignment.taskId}-${assignment.personId}` && ( <button onClick={() => setAssignmentToSubmitDelayReason(`${assignment.taskId}-${assignment.personId}`)} className="btn-warning text-sm">Submit Late</button> )} {assignmentToSubmitDelayReason === `${assignment.taskId}-${assignment.personId}` && isLate && ( <div className="w-full space-y-2 my-2 p-2 border border-warning bg-yellow-50"> <FormTextarea label="Reason for Late Submission:" id={`delayReason-${assignment.taskId}`} value={userSubmissionDelayReason} onChange={e => setUserSubmissionDelayReason(e.target.value)} /> <button onClick={() => handleUserSubmitTask(assignment.taskId, userSubmissionDelayReason)} className="btn-primary text-sm">Confirm</button <button onClick={() => { setAssignmentToSubmitDelayReason(null); setUserSubmissionDelayReason(''); }} className="btn-neutral text-sm ml-2">Cancel</button> </div> )} {!isLate && ( <button onClick={() => handleUserSubmitTask(assignment.taskId)} className="btn-primary text-sm">Mark Completed</button> )} </> )}
                           {currentUser.role === 'admin' && (assignment.status === 'submitted_on_time' || assignment.status === 'submitted_late') && ( <button onClick={() => handleAdminApproveTaskCompletion(assignment.taskId, assignment.personId)} className="btn-success text-sm">Approve Completion</button> )}
                         </div> </li> );
                   })} </ul> )}
