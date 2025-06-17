@@ -3,8 +3,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Page, User, Role, Task, Assignment, Program, GeminiSuggestion, NotificationPreference, AssignmentStatus, PendingUser, AdminLogEntry } from './types';
 import useLocalStorage from './hooks/useLocalStorage';
 import { getAssignmentSuggestion } from './services/geminiService';
-import * as emailService from './src/utils/emailService'; // Corrected import path
-import { validatePassword } from './src/utils/validation';
+import * as emailService from './utils/emailService'; // Corrected import path
+import { validatePassword } from './utils/validation';
 // import * //as cloudDataService from './services/cloudDataService'; // Deactivated
 import LoadingSpinner from './components/LoadingSpinner';
 import { UsersIcon, ClipboardListIcon, LightBulbIcon, CheckCircleIcon, TrashIcon, PlusCircleIcon, KeyIcon, BriefcaseIcon, LogoutIcon, UserCircleIcon } from './components/Icons';
@@ -252,38 +252,30 @@ export const App = (): JSX.Element => {
     }
   };
 
-  // getAdminExists is no longer globally relevant in multi-tenant.
-  // Each organization manages its own admins.
-  // const getAdminExists = () => users.some(u => u.role === 'admin');
-
-
   const loadInitialData = useCallback(async (loggedInUserTokenData?: User) => { // Token data includes orgId
     setIsLoadingAppData(true);
+    setError(null); // Clear previous errors on new load attempt
     try {
       let activeUserWithFullProfile: User | null = null;
       
       if (loggedInUserTokenData && loggedInUserTokenData.token) {
-          // Use token data to set currentUser initially, then fetch full profile
           setCurrentUserInternal(loggedInUserTokenData); 
-          // Fetch full profile to ensure all fields are up-to-date
           const userFromServer = await fetchData<BackendUser>('/users/current', {}, null);
           if (userFromServer) {
             activeUserWithFullProfile = { ...userFromServer, id: userFromServer.id || userFromServer._id!, token: loggedInUserTokenData.token };
-            setCurrentUserInternal(activeUserWithFullProfile); // Update with full profile
-          } else { // Token might be valid but user deleted, or other issue
+            setCurrentUserInternal(activeUserWithFullProfile);
+          } else { 
             localStorage.removeItem(JWT_TOKEN_KEY);
             setCurrentUserInternal(null);
           }
       } else {
         const token = localStorage.getItem(JWT_TOKEN_KEY);
         if (token) {
-          // Attempt to validate token and get user data including orgId
-          // The /users/current endpoint now expects a token that resolves to a user with an orgId
            const userFromServer = await fetchData<BackendUser>('/users/current', {}, null);
            if (userFromServer) {
              activeUserWithFullProfile = { ...userFromServer, id: userFromServer.id || userFromServer._id!, token };
              setCurrentUserInternal(activeUserWithFullProfile);
-           } else { // Token invalid or user not found
+           } else { 
              localStorage.removeItem(JWT_TOKEN_KEY);
              setCurrentUserInternal(null);
            }
@@ -291,7 +283,6 @@ export const App = (): JSX.Element => {
       }
       
       if (activeUserWithFullProfile) {
-        // All fetches will be scoped by the backend using the token's organizationId
         const [
           loadedUsers, loadedPendingUsers, loadedTasks, loadedPrograms, loadedAssignments, loadedAdminLogs,
         ] = await Promise.all([
@@ -310,18 +301,17 @@ export const App = (): JSX.Element => {
         setAssignments(loadedAssignments || []);
         setAdminLogs(loadedAdminLogs || []);
       } else {
-        // No user logged in, clear all app data
         setUsers([]); setPendingUsers([]); setTasks([]); setPrograms([]); setAssignments([]); setAdminLogs([]);
       }
       console.log("Initial data processed based on user session.");
     } catch (err: any) {
       console.error("Critical error during initial data load:", err);
       setError("Failed to load application data. Error: " + err.message);
-      if (err.message.includes("Authentication/Authorization failed") || err.message.includes("Token is missing organization information")) {
+      if (err.message.includes("Authentication/Authorization failed") || 
+          err.message.includes("Token is missing organization information") ||
+          err.message.includes("Invalid or expired token")) {
         setCurrentUser(null); // This will also remove JWT_TOKEN_KEY
-        navigateTo(Page.Login);
-      } else {
-        // For other errors, keep user logged in if they were, but show error
+        // Navigation to Login will be handled by the hashChange effect
       }
     } finally {
       setIsLoadingAppData(false);
@@ -329,32 +319,29 @@ export const App = (): JSX.Element => {
   }, []); 
 
   useEffect(() => {
-    // Attempt to load user from token on initial app load if no currentUser is set yet
     if (!currentUser) {
         const token = localStorage.getItem(JWT_TOKEN_KEY);
         if (token) {
             try {
-                // Quick parse of token to get basic info for loadInitialData,
-                // actual validation happens in loadInitialData via /users/current
                 const base64Url = token.split('.')[1];
                 const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
                 const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
                     return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
                 }).join(''));
-                const decodedTokenUser = JSON.parse(jsonPayload) as User; // Assuming User structure matches token
+                const decodedTokenUser = JSON.parse(jsonPayload) as User; 
                 if (decodedTokenUser && decodedTokenUser.id && decodedTokenUser.organizationId) {
                      loadInitialData({ ...decodedTokenUser, token });
                 } else {
-                    localStorage.removeItem(JWT_TOKEN_KEY); // Invalid token structure
-                    loadInitialData(); // Load as logged out
+                    localStorage.removeItem(JWT_TOKEN_KEY); 
+                    loadInitialData(); 
                 }
             } catch (e) {
                 console.error("Failed to parse token from localStorage", e);
                 localStorage.removeItem(JWT_TOKEN_KEY);
-                loadInitialData(); // Load as logged out
+                loadInitialData(); 
             }
         } else {
-            loadInitialData(); // No token, load as logged out
+            loadInitialData(); 
         }
     }
   }, [loadInitialData, currentUser]);
@@ -367,8 +354,14 @@ export const App = (): JSX.Element => {
   const navigateTo = useCallback((page: Page, params?: Record<string, string>) => { let hash = `#${page}`; if (params && Object.keys(params).length > 0) { hash += `?${new URLSearchParams(params).toString()}`; } if (window.location.hash !== hash) { window.location.hash = hash; } else { _setCurrentPageInternal(page); } }, []);
 
   useEffect(() => {
-    if (isLoadingAppData && !currentUser) return;
-
+    // Wait for initial data loading to complete, especially if there's no current user yet.
+    // This prevents premature redirection to login if a token is being validated.
+    if (isLoadingAppData && !currentUser && localStorage.getItem(JWT_TOKEN_KEY)) {
+        return; 
+    }
+    // If loading is done and there's still no current user (even if there was a token, it might have been invalid)
+    // then proceed with routing (which will likely lead to login page if hash is not login/prereg).
+    
     const processHash = () => {
       clearMessages();
       const hash = window.location.hash.substring(1);
@@ -378,18 +371,18 @@ export const App = (): JSX.Element => {
 
       if (targetPageFromHashPath === Page.PreRegistration) {
         const refAdminIdFromHash = params.get('refAdminId');
-        // Pre-reg link implies the user is joining an existing organization.
-        // We'd need to fetch the admin's org details or pass orgId in the link too.
-        // For now, relies on backend to associate with correct org via refAdminId.
-        const adminUser = users.find(u => u.id === refAdminIdFromHash && u.role === 'admin');
-
-
-        setPreRegistrationForm(prev => ({
-          ...initialPreRegistrationFormState,
-          referringAdminId: refAdminIdFromHash || '',
-          referringAdminDisplayName: adminUser ? adminUser.displayName : (refAdminIdFromHash ? `Admin ID: ${refAdminIdFromHash}`: 'an administrator'),
-          isReferralLinkValid: !!refAdminIdFromHash // Simpler validation, backend will confirm admin and org
-        }));
+        // Fetch users to find admin display name, but don't block rendering.
+        // Backend will validate refAdminId and determine organization.
+        // This is primarily for display purposes on the pre-reg form.
+        fetchData<User[]>(`/users?role=admin&id=${refAdminIdFromHash}`, {}, []).then(admins => {
+            const adminUser = admins ? admins.find(u => u.id === refAdminIdFromHash) : null;
+            setPreRegistrationForm(prev => ({
+              ...initialPreRegistrationFormState,
+              referringAdminId: refAdminIdFromHash || '',
+              referringAdminDisplayName: adminUser ? adminUser.displayName : (refAdminIdFromHash ? `Admin (Site ID: ${refAdminIdFromHash})`: 'an administrator'),
+              isReferralLinkValid: !!refAdminIdFromHash 
+            }));
+        });
         _setCurrentPageInternal(Page.PreRegistration);
         return;
       }
@@ -433,7 +426,7 @@ export const App = (): JSX.Element => {
     return () => {
       window.removeEventListener('hashchange', processHash);
     };
-  }, [currentUser, navigateTo, clearMessages, users, isLoadingAppData, _setCurrentPageInternal]);
+  }, [currentUser, navigateTo, clearMessages, isLoadingAppData, _setCurrentPageInternal]);
 
 
   useEffect(() => {
@@ -457,9 +450,6 @@ export const App = (): JSX.Element => {
   }, [currentPage, currentUser]);
 
   const getAdminToNotify = useCallback((referringAdminId?: string): User | undefined => {
-    // In multi-tenant, admin notifications should be scoped to the organization.
-    // For now, if referringAdminId is provided and exists in current users list (which is org-scoped), use that.
-    // Otherwise, find any admin in the current (org-scoped) users list.
     if (referringAdminId) {
       const refAdmin = users.find(u => u.id === referringAdminId && u.role === 'admin');
       if (refAdmin) return refAdmin;
@@ -502,10 +492,10 @@ const handleNewRegistration = async (e: React.FormEvent) => {
     role: role,
     uniqueId,
     position: position || (role === 'admin' ? 'Administrator' : 'User Position'),
-    organizationName: role === 'admin' ? organizationName : undefined, // Sent to backend, may inform org creation
+    organizationName: role === 'admin' ? organizationName : undefined, 
   };
 
-  const endpoint = '/users/register'; // Central registration, backend handles admin/user/pending logic
+  const endpoint = '/users/register'; 
 
   try {
     const response = await fetchData<{ success: boolean; user: BackendUser | BackendPendingUser; message?: string }>(endpoint, {
@@ -514,24 +504,15 @@ const handleNewRegistration = async (e: React.FormEvent) => {
     });
 
     if (response && response.success && response.user) {
-      // Assuming successful registration always means direct user creation for now,
-      // or backend returns clear indication if it's pending.
-      // Based on current backend userRoutes, /register creates an active user.
-      const createdUser = response.user as BackendUser; // If it's BackendPendingUser, type assertion will be an issue
+      const createdEntity = response.user;
       
-      // If a new admin registered, their data is not added to current `users` list yet, as it's a new org context.
-      // They need to log in to populate their new org's data.
-      if (createdUser.role === 'admin') {
+      if ('role' in createdEntity && createdEntity.role === 'admin') { // Assuming BackendUser for admin
          setSuccessMessage(`Administrator account for organization '${organizationName}' registered successfully! You can now log in.`);
-      } else {
-         // This flow implies a user registered under an existing (but not current) admin,
-         // or a general registration that got associated with an org.
-         // This needs more thought for multi-tenant general registration.
-         // For now, assume this path is less common or handled by pre-reg.
-         setSuccessMessage(`User account for ${createdUser.displayName} registered. If admin approval is needed, you'll be notified.`);
+      } else { // Could be BackendPendingUser or BackendUser if auto-approved user
+         setSuccessMessage(`User account for ${createdEntity.displayName} registered. If admin approval is needed, you'll be notified.`);
       }
 
-      emailService.sendWelcomeRegistrationEmail(createdUser.email, createdUser.displayName, createdUser.role);
+      emailService.sendWelcomeRegistrationEmail(createdEntity.email, createdEntity.displayName, createdEntity.role);
       setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user', uniqueId: '', position: '', organizationName: '' });
       setAuthView('login');
     } else {
@@ -566,27 +547,11 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     return;
   }
   
-  // Try to find referring admin to get their organizationId to pass to backend
-  // This helps backend scope the pending user correctly.
-  let organizationIdFromReferrer;
-  if (referringAdminId) {
-    // This assumes `users` list on client might have the referring admin if admin is browsing.
-    // More robustly, fetch admin details or rely on backend to correctly scope via referringAdminId.
-    // For now, this is a client-side attempt.
-    const refAdminInState = users.find(u => u.id === referringAdminId);
-    if (refAdminInState) {
-        organizationIdFromReferrer = refAdminInState.organizationId;
-    }
-    // If not found in current client state (e.g. user doing pre-reg directly from link),
-    // backend must use referringAdminId to find the organization.
-  }
-
-
   const newPendingUserData = {
     uniqueId, displayName, email, password,
-    role: 'user' as Role, 
-    referringAdminId: referringAdminId || undefined,
-    organizationIdFromReferrer: organizationIdFromReferrer // Pass to backend
+    role: 'user' as Role, // Pre-registrations are for 'user' role.
+    referringAdminId: referringAdminId || undefined
+    // organizationId will be determined by backend based on referringAdminId
   };
 
   try {
@@ -596,18 +561,11 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     });
 
     if (response && response.success && response.user) {
-      // Pending user is created in the backend, associated with an organization.
-      // No need to add to client-side `pendingUsers` list here if admin is not logged in or in different org.
       setSuccessMessage("Pre-registration submitted successfully! Your account is pending administrator approval.");
       setPreRegistrationForm(prev => ({ ...initialPreRegistrationFormState, referringAdminId: prev.referringAdminId, referringAdminDisplayName: prev.referringAdminDisplayName, isReferralLinkValid: prev.isReferralLinkValid }));
 
-      // Email notifications
       emailService.sendPreRegistrationSubmittedToUserEmail(response.user.email, response.user.displayName, preRegistrationForm.referringAdminDisplayName);
-      // Admin notification needs to be smarter - find the correct admin for that organization.
-      // For now, if referringAdminId is present, we assume backend handles notifying that specific admin.
-      if (referringAdminId) {
-        // emailService.sendPreRegistrationNotificationToAdminEmail(...); // This would require fetching admin details
-      }
+      // Backend should notify the specific referring admin
     } else {
       setError(response?.message || "Failed to submit pre-registration.");
     }
@@ -631,7 +589,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     }
 
     try {
-      // Login response user object should include organizationId
       const response = await fetchData<{ success: boolean; user: User; token: string; message?: string }>('/users/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
@@ -639,18 +596,21 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
       if (response && response.success && response.user && response.token && response.user.organizationId) {
         const loggedInUserWithTokenAndOrg: User = {
-          ...response.user, // this now includes organizationId from backend
+          ...response.user, 
           token: response.token
         };
-        // setCurrentUser(loggedInUserWithTokenAndOrg); // This will be set by loadInitialData
-
+        
         setSuccessMessage(`Welcome back, ${loggedInUserWithTokenAndOrg.displayName}!`);
         setNewLoginForm({ email: '', password: '' });
 
-        await loadInitialData(loggedInUserWithTokenAndOrg); // Pass token data
+        // loadInitialData will call setCurrentUser and handle localStorage for token
+        await loadInitialData(loggedInUserWithTokenAndOrg); 
 
+        // Determine target page after data load completes and currentUser is fully set by loadInitialData.
+        // navigateTo might be called too early here if loadInitialData's effects on currentUser aren't immediate for this scope.
+        // The hashChange useEffect is better suited to handle navigation post-login based on updated currentUser.
         const targetPage = loggedInUserWithTokenAndOrg.role === 'admin' ? Page.Dashboard : Page.ViewAssignments;
-        navigateTo(targetPage);
+        navigateTo(targetPage); // This might need to be after loadInitialData fully resolves and updates state.
 
         if (loggedInUserWithTokenAndOrg.role === 'user' && !localStorage.getItem(`hasCompletedUserTour_${loggedInUserWithTokenAndOrg.id}`)) {
           setShowUserTour(true);
@@ -668,28 +628,22 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     const token = localStorage.getItem(JWT_TOKEN_KEY);
     if (token) {
         try {
-          await fetchData('/users/logout', { method: 'POST' }); // Backend might do session cleanup if any
+          await fetchData('/users/logout', { method: 'POST' }); 
         } catch (err: any) {
           console.warn("Logout API call failed (user will be logged out client-side anyway):", err.message);
         }
     }
-    setCurrentUser(null); // This also removes JWT_TOKEN_KEY
+    setCurrentUser(null); 
     setUsers([]);
     setPendingUsers([]);
     setTasks([]);
     setPrograms([]);
     setAssignments([]);
     setAdminLogs([]);
-    _setCurrentPageInternal(Page.Login); // Directly set internal state first
-    navigateTo(Page.Login); // Then update hash
+    _setCurrentPageInternal(Page.Login); 
+    navigateTo(Page.Login); 
     setSuccessMessage("You have been logged out successfully.");
   };
-// ... (rest of App.tsx remains largely the same, but all data display will be implicitly scoped by backend)
-// Key changes for User Management within App.tsx:
-// - When creating user by admin: new user inherits admin's organizationId.
-// - When approving pending user: user joins admin's organization.
-// - Deleting users: scoped by admin's organization.
-// - Generating pre-reg link: link should ideally carry org context for backend.
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -705,7 +659,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
     const updatePayload: Partial<User> & { password?: string } = {
       uniqueId, displayName, position, userInterests, phone, notificationPreference,
-      // email and role are not updated here. organizationId is immutable for a user.
     };
 
     if (password) {
@@ -720,7 +673,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     }
 
     try {
-      // Backend will ensure this update is for the correct user and within their org.
       const response = await fetchData<{ success: boolean; user: BackendUser; message?: string }>(`/users/${currentUser.id}`, {
         method: 'PUT',
         body: JSON.stringify(updatePayload),
@@ -730,15 +682,13 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         const updatedUserFromServer: User = {
             ...response.user,
             id: response.user.id || response.user._id!,
-            organizationId: currentUser.organizationId, // Ensure orgId from current session is retained
+            organizationId: currentUser.organizationId, 
             token: localStorage.getItem(JWT_TOKEN_KEY) || undefined
         };
-        // Update user in local state
         setUsers(users.map(u => u.id === currentUser.id ? updatedUserFromServer : u));
-        setCurrentUserInternal(updatedUserFromServer); // Update current user state
+        setCurrentUserInternal(updatedUserFromServer); 
         setSuccessMessage("Profile updated successfully!");
         setUserForm(prev => ({ ...prev, password: '', confirmPassword: '' }));
-        // Admin log should also be scoped by organizationId on backend
         if (currentUser.role === 'admin') {
             await addAdminLogEntry(`User profile updated for ${updatedUserFromServer.displayName} (ID: ${updatedUserFromServer.uniqueId}).`);
         }
@@ -766,7 +716,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
     const updatePayload: Partial<User> & { password?: string } = {
       email, uniqueId, displayName, position, userInterests, phone, notificationPreference, role,
-      organizationId: currentUser.organizationId // Ensure update is within admin's org
+      organizationId: currentUser.organizationId 
     };
 
     if (password) {
@@ -777,7 +727,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     }
 
     try {
-      // Backend will ensure admin can only update users in their own organization.
       const response = await fetchData<{ success: boolean; user: BackendUser; message?: string }>(`/users/${editingUserId}`, {
         method: 'PUT',
         body: JSON.stringify(updatePayload),
@@ -822,14 +771,14 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       email, uniqueId, password, 
       role: role, 
       displayName, position, userInterests, phone, notificationPreference,
-      referringAdminId: currentUser.id, // Admin creating the user
-      organizationId: currentUser.organizationId // New user belongs to this admin's organization
+      referringAdminId: currentUser.id, 
+      organizationId: currentUser.organizationId 
     };
 
     try {
       const response = await fetchData<{ success: boolean; user: BackendUser; message?: string }>('/users/register', { 
         method: 'POST',
-        body: JSON.stringify(newUserData), // Backend will use organizationId from payload
+        body: JSON.stringify(newUserData), 
       });
 
       if (response && response.success && response.user) {
@@ -852,7 +801,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     if (!approvingPendingUser || !currentUser || currentUser.role !== 'admin' || !currentUser.organizationId) {
       setError("Approval failed: Invalid operation, permissions, or missing organization context."); return;
     }
-    // Ensure admin is approving a user for their own organization
     if (approvingPendingUser.organizationId && approvingPendingUser.organizationId !== currentUser.organizationId) {
         setError("Cannot approve user from a different organization."); return;
     }
@@ -866,11 +814,9 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         phone: userForm.phone || '',
         notificationPreference: userForm.notificationPreference || 'email',
         role: roleToApprove,
-        // organizationId will be handled by backend based on pending user record or admin's context
     };
     
     try {
-      // Backend /pending-users/approve/:id should ensure approved user is created in admin's organization.
       const response = await fetchData<{ success: boolean; user: BackendUser; message?: string }>(`/pending-users/approve/${approvingPendingUser.id}`, {
         method: 'POST',
         body: JSON.stringify(approvalData),
@@ -899,7 +845,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     clearMessages();
     try {
       const userToReject = pendingUsers.find(pu => pu.id === pendingUserId);
-       // Backend will ensure admin can only reject users from their own organization.
       const response = await fetchData<{success: boolean, message?:string}>(`/pending-users/${pendingUserId}`, { method: 'DELETE' });
 
       if(response && response.success){
@@ -919,14 +864,11 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     if (currentUser.id === userId) { setError("Admins cannot delete their own accounts."); return; }
     
     const userToDelete = users.find(u => u.id === userId);
-    // Backend will ensure admin can only delete users from their own organization.
     clearMessages();
     try {
       const response = await fetchData<{success: boolean, message?:string}>(`/users/${userId}`, { method: 'DELETE' });
       if(response && response.success) {
         setUsers(prev => prev.filter(u => u.id !== userId));
-        // Refresh assignments if a user is deleted, as they might have had tasks.
-        // Backend should scope this to the organization.
         const updatedAssignments = await fetchData<Assignment[]>('/assignments', {}, []);
         setAssignments(updatedAssignments || []);
         setSuccessMessage(`User ${userToDelete?.displayName || 'user'} deleted.`);
@@ -943,8 +885,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     if (!currentUser || currentUser.role !== 'admin' || !currentUser.organizationId) {
       setError("Only admins can generate pre-registration links."); return;
     }
-    // Link should ideally include organization context if backend needs it explicitly,
-    // otherwise backend uses refAdminId to determine organization.
     const link = `${window.location.origin}${window.location.pathname}#${Page.PreRegistration}?refAdminId=${currentUser.id}`;
     setGeneratedLink(link);
     setSuccessMessage("Pre-registration link generated. Share it with the intended user.");
@@ -964,7 +904,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); clearMessages();
     if (!currentUser || !currentUser.organizationId) { setError("Organization context missing."); return; }
     if (!programForm.name.trim() || !programForm.description.trim()) { setError("Program name and description are required."); return; }
-    // Backend will associate program with currentUser.organizationId.
     const newProgramData: Omit<Program, 'id' | 'organizationId'> = { ...programForm };
     try {
       const createdProgram = await fetchData<Program>('/programs', { method: 'POST', body: JSON.stringify(newProgramData) });
@@ -980,7 +919,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
   const handleDeleteProgram = async (programId: string) => {
     clearMessages();
     if (!currentUser || !currentUser.organizationId) { setError("Organization context missing."); return; }
-    // Backend will ensure deletion is scoped to organization.
     try {
       const programToDelete = programs.find(p => p.id === programId);
       await fetchData(`/programs/${programId}`, { method: 'DELETE' });
@@ -996,10 +934,9 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); clearMessages();
     if (!currentUser || !currentUser.organizationId) { setError("Organization context missing."); return; }
     if (!taskForm.title.trim() || !taskForm.description.trim() || !taskForm.requiredSkills.trim()) { setError("Task title, description, and required skills are required."); return; }
-    const associatedProgram = programs.find(p => p.id === taskForm.programId); // programs is already org-scoped
+    const associatedProgram = programs.find(p => p.id === taskForm.programId); 
     const newTaskData: Partial<Omit<Task, 'id' | 'organizationId'>> = { ...taskForm, deadline: taskForm.deadline ? new Date(taskForm.deadline).toISOString().split('T')[0] : undefined, programName: associatedProgram?.name };
     try {
-      // Backend associates task with currentUser.organizationId.
       const createdTask = await fetchData<Task>('/tasks', { method: 'POST', body: JSON.stringify(newTaskData) });
       if (createdTask && createdTask.id) {
         setTasks(prev => [...prev, createdTask]);
@@ -1013,7 +950,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
   const handleDeleteTask = async (taskId: string) => {
     clearMessages();
      if (!currentUser || !currentUser.organizationId) { setError("Organization context missing."); return; }
-    // Backend ensures deletion is scoped to organization.
     try {
       const taskToDelete = tasks.find(t => t.id === taskId);
       await fetchData(`/tasks/${taskId}`, { method: 'DELETE' });
@@ -1026,9 +962,8 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
   const handleGetAssignmentSuggestion = async () => {
     if (!selectedTaskForAssignment) { setError("Please select a task first."); return; }
-    const task = tasks.find(t => t.id === selectedTaskForAssignment); // tasks is org-scoped
+    const task = tasks.find(t => t.id === selectedTaskForAssignment); 
     if (!task) { setError("Selected task not found."); return; }
-    // users and assignments are already org-scoped.
     const usersEligible = users.filter(u => u.role === 'user' && !assignments.some(a => a.taskId === task.id && a.personId === u.id && (a.status === 'pending_acceptance' || a.status === 'accepted_by_user')));
     setIsLoadingSuggestion(true); setError(null); setAssignmentSuggestion(null);
     try {
@@ -1048,12 +983,11 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     const personIdToAssign = (e.target as HTMLFormElement).assignPerson.value;
     const specificDeadline = (e.target as HTMLFormElement).specificDeadline?.value;
     if (!selectedTaskForAssignment || !personIdToAssign) { setError("Task and person must be selected."); return; }
-    const task = tasks.find(t => t.id === selectedTaskForAssignment); // org-scoped
-    const person = users.find(u => u.id === personIdToAssign); // org-scoped
+    const task = tasks.find(t => t.id === selectedTaskForAssignment); 
+    const person = users.find(u => u.id === personIdToAssign); 
     if (!task || !person) { setError("Selected task or person not found in your organization."); return; }
     if (assignments.some(a => a.taskId === task.id && a.personId === person.id && (a.status === 'pending_acceptance' || a.status === 'accepted_by_user'))) { setError(`${person.displayName} is already assigned this task or pending acceptance.`); return; }
     const justification = suggestedPersonDisplayName === person.displayName && assignmentSuggestion?.justification ? assignmentSuggestion.justification : 'Manually assigned by admin.';
-    // Backend will set organizationId on assignment.
     const newAssignmentData: Partial<Omit<Assignment, 'organizationId'>> = { taskId: task.id, personId: person.id, taskTitle: task.title, personName: person.displayName, justification, status: 'pending_acceptance', deadline: specificDeadline || task.deadline, };
     try {
       const createdAssignment = await fetchData<Assignment>('/assignments', { method: 'POST', body: JSON.stringify(newAssignmentData) });
@@ -1068,10 +1002,9 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
   };
 
   const updateAssignmentStatus = async (taskId: string, personId: string, newStatus: AssignmentStatus, additionalData: Record<string, any> = {}) => {
-    if (!currentUser && newStatus !== 'pending_acceptance') return null; // Should have currentUser if logged in
+    if (!currentUser && newStatus !== 'pending_acceptance') return null; 
     if (!currentUser || !currentUser.organizationId) { setError("Organization context missing."); return null;}
     clearMessages();
-    // Backend will ensure this is scoped to organization.
     const payload = { taskId, personId, status: newStatus, ...additionalData };
     try {
       const updatedAssignment = await fetchData<Assignment>(`/assignments`, { method: 'PATCH', body: JSON.stringify(payload) });
@@ -1089,7 +1022,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         const updatedAssignment = await updateAssignmentStatus(taskId, currentUser.id, 'accepted_by_user');
         if (updatedAssignment) {
             setSuccessMessage(`Task "${updatedAssignment.taskTitle}" accepted.`);
-            const admin = getAdminToNotify(users.find(u=>u.id === currentUser.referringAdminId)?.id); // users is org-scoped
+            const admin = getAdminToNotify(users.find(u=>u.id === currentUser.referringAdminId)?.id); 
             if (admin?.notificationPreference === 'email' && admin.email) { emailService.sendTaskStatusUpdateToAdminEmail(admin.email, admin.displayName, currentUser.displayName, updatedAssignment.taskTitle, "accepted"); }
         }
     } catch (e) { /* error set by updateAssignmentStatus */ }
@@ -1133,10 +1066,9 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
   const handleAdminApproveTaskCompletion = async (taskId: string, personId: string) => {
     if (!currentUser || currentUser.role !== 'admin') return;
      try {
-        // Backend will scope this.
         const updated = await updateAssignmentStatus(taskId, personId, 'completed_admin_approved');
         if (updated) {
-            const user = users.find(u => u.id === personId); // users is org-scoped
+            const user = users.find(u => u.id === personId); 
             setSuccessMessage(`Completion of task "${updated.taskTitle}" by ${user?.displayName || 'user'} approved.`);
             if (user?.notificationPreference === 'email' && user.email) { emailService.sendTaskCompletionApprovedToUserEmail(user.email, user.displayName, updated.taskTitle, currentUser.displayName); }
             await addAdminLogEntry(`Admin approved task completion for "${updated.taskTitle}" by ${user?.displayName}.`);
@@ -1146,7 +1078,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
   const addAdminLogEntry = async (logText: string, imagePreviewUrl?: string) => {
     if (!currentUser || currentUser.role !== 'admin' || !currentUser.organizationId) return;
-    // Backend will set organizationId.
     const newLogData: Omit<AdminLogEntry, 'id' | 'organizationId'> = { adminId: currentUser.id, adminDisplayName: currentUser.displayName, timestamp: new Date().toISOString(), logText, imagePreviewUrl };
     try {
         const createdLog = await fetchData<AdminLogEntry>('/admin-logs', { method: 'POST', body: JSON.stringify(newLogData) });
@@ -1185,8 +1116,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     const emailToReset = newLoginForm.email;
     if (!emailToReset || !/\S+@\S+\.\S+/.test(emailToReset)) { setError("Please enter a valid email address."); return; }
     try {
-        // Backend /forgot-password might need org context if emails are not globally unique.
-        // For now, assuming email is the primary lookup for password reset.
         await fetchData('/users/forgot-password', { method: 'POST', body: JSON.stringify({ email: emailToReset }) });
         setInfoMessage(`If an account exists for ${emailToReset}, a password reset link has been sent.`);
     } catch (err: any) {
@@ -1223,7 +1152,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     </>
   );
 
-  if (isLoadingAppData && !currentUser) { // Still loading or token validation failed but before redirect
+  if (isLoadingAppData && !currentUser && localStorage.getItem(JWT_TOKEN_KEY)) { 
      return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-bground p-4">
         <LoadingSpinner />
@@ -1249,12 +1178,9 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       );
     }
 
-    // "anyAdminExists" is no longer globally relevant.
-    // The registration form logic will handle admin vs user role selection.
-
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-authPageBg p-4 main-app-scope">
-        {isLoadingAppData && <div className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-50 flex items-center justify-center z-50"><LoadingSpinner /><p className="text-white ml-2">Loading...</p></div>}
+        {isLoadingAppData && localStorage.getItem(JWT_TOKEN_KEY) && <div className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-50 flex items-center justify-center z-50"><LoadingSpinner /><p className="text-white ml-2">Loading...</p></div>}
         <div className="bg-surface p-8 rounded-xl shadow-2xl w-full max-w-md">
           <UIMessages />
           <h2 className="text-3xl font-bold text-textlight mb-6 text-center">
@@ -1272,8 +1198,8 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                 <label htmlFor="loginPassword" className="block text-sm font-medium text-textlight">Password</label>
                 <AuthFormInput type="password" id="loginPassword" aria-label="Password for login" placeholder="Enter your password" value={newLoginForm.password} onChange={(e) => setNewLoginForm({ ...newLoginForm, password: e.target.value })} required autoComplete="current-password" />
               </div>
-              <button type="submit" className="w-full py-3 px-4 bg-authButton hover:bg-authButtonHover text-textlight font-semibold rounded-md shadow-sm transition-colors text-sm" disabled={isLoadingAppData}>
-                {isLoadingAppData ? <LoadingSpinner /> : 'Sign In'}
+              <button type="submit" className="w-full py-3 px-4 bg-authButton hover:bg-authButtonHover text-textlight font-semibold rounded-md shadow-sm transition-colors text-sm" disabled={isLoadingAppData && !!localStorage.getItem(JWT_TOKEN_KEY)}>
+                {(isLoadingAppData && !!localStorage.getItem(JWT_TOKEN_KEY)) ? <LoadingSpinner /> : 'Sign In'}
               </button>
               <div className="text-sm text-center"> <button type="button" onClick={handleForgotPassword} className="font-medium text-authLink hover:underline"> Forgot password? </button> </div>
             </form>
@@ -1302,8 +1228,8 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                 </small>
 
 
-              <button type="submit" className="w-full py-3 px-4 bg-authButton hover:bg-authButtonHover text-textlight font-semibold rounded-md shadow-sm transition-colors text-sm" disabled={isLoadingAppData}>
-                {isLoadingAppData ? <LoadingSpinner/> : 'Register'}
+              <button type="submit" className="w-full py-3 px-4 bg-authButton hover:bg-authButtonHover text-textlight font-semibold rounded-md shadow-sm transition-colors text-sm" disabled={isLoadingAppData && !!localStorage.getItem(JWT_TOKEN_KEY)}>
+                {(isLoadingAppData && !!localStorage.getItem(JWT_TOKEN_KEY)) ? <LoadingSpinner/> : 'Register'}
               </button>
             </form>
           )}
@@ -1313,7 +1239,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
               {authView === 'login' ? 'Register here' : 'Sign in here'}
             </button>
           </p>
-          {/* Removed the global "First-time Setup" hint as admin registration now creates a new org. */}
         </div>
         <footer className="text-center py-6 text-sm text-neutral mt-auto">
           <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by SHAIK MOAHAMMED NAWAZ.</p>
@@ -1448,7 +1373,6 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                     <thead className="bg-bground"> <tr> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Name</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Email / System ID</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Intended Role / Date</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Actions</th> </tr> </thead>
                     <tbody className="bg-surface divide-y divide-gray-200">
                       {pendingUsers.map(pu => {
-                        // Admin can approve any user in their organization's pending list.
                         const canApprove = currentUser && currentUser.role === 'admin' && pu.organizationId === currentUser.organizationId;
                         return (
                           <tr key={pu.id}>
