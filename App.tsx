@@ -436,6 +436,28 @@ export const App = (): JSX.Element => {
       if ([Page.Login, Page.PreRegistration, Page.AdminRegistrationEmail, Page.AdminRegistrationProfile, Page.InitialAdminSetup].includes(newPage as Page)) {
         newPage = defaultPageDetermination;
       }
+      
+      _setCurrentPageInternal(newPage); // Set page first
+
+      // If admin navigates to Dashboard or UserManagement, re-fetch key lists for freshness
+      if (currentUser && currentUser.role === 'admin' &&
+          (newPage === Page.Dashboard || newPage === Page.UserManagement) &&
+          (isLoadingAppData === false) // Only if not already loading, to prevent redundant calls
+      ) {
+          // console.log(`Admin navigating to ${newPage}, re-fetching list data...`);
+          Promise.all([
+              fetchData<User[]>('/users', {}, []),
+              fetchData<PendingUser[]>('/pending-users', {}, [])
+              // Add other lists if they are frequently updated and critical for these pages
+          ]).then(([loadedUsers, loadedPendingUsers]) => {
+              if (loadedUsers) setUsers(loadedUsers);
+              if (loadedPendingUsers) setPendingUsers(loadedPendingUsers);
+          }).catch(err => {
+              console.error("Error re-fetching admin data on navigation:", err);
+              setError("Could not refresh admin data: " + err.message);
+          });
+      }
+
 
       const currentTopLevelPagePath = window.location.hash.substring(1).split('?')[0].toUpperCase();
       const targetParams = paramsString ? Object.fromEntries(params) : undefined;
@@ -443,7 +465,7 @@ export const App = (): JSX.Element => {
       if (newPage !== currentTopLevelPagePath && Object.values(Page).includes(newPage)) {
            navigateTo(newPage, targetParams);
       }
-      _setCurrentPageInternal(newPage);
+      // _setCurrentPageInternal(newPage); // Moved up to set page before potential re-fetch
 
       if (currentUser && currentUser.role === 'user' && !localStorage.getItem(`hasCompletedUserTour_${currentUser.id}`)) {
          setTimeout(() => {
@@ -461,7 +483,7 @@ export const App = (): JSX.Element => {
     return () => {
       window.removeEventListener('hashchange', processHash);
     };
-  }, [currentUser, navigateTo, clearMessages, isLoadingAppData, _setCurrentPageInternal]);
+  }, [currentUser, navigateTo, clearMessages, isLoadingAppData, _setCurrentPageInternal]); // _setCurrentPageInternal is stable
 
 
   useEffect(() => {
