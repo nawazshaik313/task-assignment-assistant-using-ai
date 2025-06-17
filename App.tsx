@@ -3,8 +3,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Page, User, Role, Task, Assignment, Program, GeminiSuggestion, NotificationPreference, AssignmentStatus, PendingUser, AdminLogEntry } from './types';
 import useLocalStorage from './hooks/useLocalStorage';
 import { getAssignmentSuggestion } from './services/geminiService';
-import * as emailService from './src/utils/emailService'; // Corrected import path
-import { validatePassword } from './src/utils/validation'; // Corrected import path
+import * as emailService from './utils/emailService'; // Corrected import path
+import { validatePassword } from './utils/validation'; // Corrected import path
 // import * //as cloudDataService from './services/cloudDataService'; // Deactivated
 import LoadingSpinner from './components/LoadingSpinner';
 import { UsersIcon, ClipboardListIcon, LightBulbIcon, CheckCircleIcon, TrashIcon, PlusCircleIcon, KeyIcon, BriefcaseIcon, LogoutIcon, UserCircleIcon } from './components/Icons';
@@ -260,16 +260,17 @@ export const App = (): JSX.Element => {
       let activeUserWithFullProfile: User | null = null;
 
       if (loggedInUserTokenData && loggedInUserTokenData.token && loggedInUserTokenData.organizationId) {
-          setCurrentUserInternal(loggedInUserTokenData);
+          setCurrentUserInternal(loggedInUserTokenData); // Tentatively set currentUser based on token
           const userFromServer = await fetchData<BackendUser>('/users/current', {}, null);
           if (userFromServer && userFromServer.organizationId === loggedInUserTokenData.organizationId) {
             activeUserWithFullProfile = { ...userFromServer, id: userFromServer.id || userFromServer._id!, token: loggedInUserTokenData.token };
-            setCurrentUserInternal(activeUserWithFullProfile);
+            setCurrentUserInternal(activeUserWithFullProfile); // Final set from server
           } else {
+            console.warn("loadInitialData: Backend validation of token failed or org ID mismatch. Logging out.", { tokenOrg: loggedInUserTokenData.organizationId, serverUser: userFromServer });
             localStorage.removeItem(JWT_TOKEN_KEY);
             setCurrentUserInternal(null);
           }
-      } else if (!loggedInUserTokenData) {
+      } else if (!loggedInUserTokenData) { // No pre-decoded token, check localStorage directly
         const token = localStorage.getItem(JWT_TOKEN_KEY);
         if (token) {
            const userFromServer = await fetchData<BackendUser>('/users/current', {}, null);
@@ -277,11 +278,14 @@ export const App = (): JSX.Element => {
              activeUserWithFullProfile = { ...userFromServer, id: userFromServer.id || userFromServer._id!, token };
              setCurrentUserInternal(activeUserWithFullProfile);
            } else {
+             console.warn("loadInitialData: Token from localStorage invalid or user lacks orgId on backend. Logging out.", { serverUser: userFromServer });
              localStorage.removeItem(JWT_TOKEN_KEY);
              setCurrentUserInternal(null);
            }
         }
-      } else {
+        // If no token in localStorage, activeUserWithFullProfile remains null.
+      } else { // loggedInUserTokenData exists, but is missing token or orgId (should be caught by initial useEffect)
+        console.warn("loadInitialData: loggedInUserTokenData provided but incomplete. Logging out.", { loggedInUserTokenData });
         localStorage.removeItem(JWT_TOKEN_KEY);
         setCurrentUserInternal(null);
       }
@@ -305,9 +309,10 @@ export const App = (): JSX.Element => {
         setAssignments(loadedAssignments || []);
         setAdminLogs(loadedAdminLogs || []);
       } else {
+        // No active user, clear all data arrays
         setUsers([]); setPendingUsers([]); setTasks([]); setPrograms([]); setAssignments([]); setAdminLogs([]);
       }
-      console.log("Initial data processed based on user session.");
+      // console.log("Initial data processed. currentUser:", activeUserWithFullProfile ? activeUserWithFullProfile.email : "null");
     } catch (err: any) {
       console.error("Critical error during initial data load:", err);
       setError("Failed to load application data. Error: " + err.message);
@@ -487,19 +492,19 @@ const handleNewRegistration = async (e: React.FormEvent) => {
   }
 
   const registrationData: any = {
-    displayName: name,
-    email,
-    password,
+    displayName: name.trim(),
+    email: email.trim(),
+    password: password, // Do not trim password
     role: role,
-    uniqueId,
-    position: position || (role === 'admin' ? 'Administrator' : 'User Position'),
-    companyName: role === 'admin' ? companyName : undefined, // Changed organizationName to companyName
+    uniqueId: uniqueId.trim(),
+    position: position.trim() || (role === 'admin' ? 'Administrator' : 'User Position'),
+    companyName: role === 'admin' ? companyName.trim() : undefined, // Changed organizationName to companyName
   };
 
   const endpoint = '/users/register';
 
   try {
-    const response = await fetchData<{ success: boolean; user: BackendUser | BackendPendingUser; message?: string }>(endpoint, {
+    const response = await fetchData<{ success: boolean; user: BackendUser | BackendPendingUser; message?: string, errors?: Record<string,string> }>(endpoint, {
       method: 'POST',
       body: JSON.stringify(registrationData),
     });
@@ -519,7 +524,12 @@ const handleNewRegistration = async (e: React.FormEvent) => {
       setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user', uniqueId: '', position: '', companyName: '' }); // Changed organizationName to companyName
       setAuthView('login');
     } else {
-      setError(response?.message || "Registration failed. Please check details and try again.");
+      let mainError = response?.message || "Registration failed. Please check details and try again.";
+      if(response?.errors){
+        const fieldErrors = Object.entries(response.errors).map(([field, msg]) => `${field}: ${msg}`).join('; ');
+        mainError = `${mainError} (${fieldErrors})`;
+      }
+      setError(mainError);
     }
   } catch (err: any) {
     setError(err.message || "Registration failed. Please try again later.");
@@ -551,14 +561,17 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
   }
 
   const newPendingUserData = {
-    uniqueId, displayName, email, password,
+    uniqueId: uniqueId.trim(),
+    displayName: displayName.trim(),
+    email: email.trim(),
+    password: password, // Do not trim password
     role: 'user' as Role, // Pre-registrations are for 'user' role.
     referringAdminId: referringAdminId || undefined
     // organizationId will be determined by backend based on referringAdminId
   };
 
   try {
-    const response = await fetchData<{ success: boolean; user: BackendPendingUser; message?: string }>('/pending-users', {
+    const response = await fetchData<{ success: boolean; user: BackendPendingUser; message?: string, errors?: Record<string,string> }>('/pending-users', {
       method: 'POST',
       body: JSON.stringify(newPendingUserData),
     });
@@ -570,7 +583,12 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       emailService.sendPreRegistrationSubmittedToUserEmail(response.user.email, response.user.displayName, preRegistrationForm.referringAdminDisplayName);
       // Backend should notify the specific referring admin
     } else {
-      setError(response?.message || "Failed to submit pre-registration.");
+      let mainError = response?.message || "Failed to submit pre-registration.";
+      if(response?.errors){
+        const fieldErrors = Object.entries(response.errors).map(([field, msg]) => `${field}: ${msg}`).join('; ');
+        mainError = `${mainError} (${fieldErrors})`;
+      }
+      setError(mainError);
     }
   } catch (err: any) {
     setError(err.message || "Failed to submit pre-registration. Please try again later.");
@@ -586,7 +604,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       setError("Email and password are required.");
       return;
     }
-     if (!/\S+@\S+\.\S+/.test(email)) {
+     if (!/\S+@\S+\.\S+/.test(email.trim())) {
       setError("Please enter a valid email address.");
       return;
     }
@@ -594,7 +612,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     try {
       const response = await fetchData<{ success: boolean; user: User; token: string; message?: string }>('/users/login', {
         method: 'POST',
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: email.trim(), password: password }), // Trim email, do not trim password
       });
 
       if (response && response.success && response.user && response.token && response.user.organizationId) {
@@ -660,7 +678,12 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     }
 
     const updatePayload: Partial<User> & { password?: string } = {
-      uniqueId, displayName, position, userInterests, phone, notificationPreference,
+      uniqueId: uniqueId.trim(), 
+      displayName: displayName.trim(), 
+      position: position.trim(), 
+      userInterests: userInterests?.trim(), 
+      phone: phone?.trim(), 
+      notificationPreference,
     };
 
     if (password) {
@@ -671,7 +694,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         if (!passwordValidationResult.isValid) {
             setError(passwordValidationResult.errors.join(" ")); return;
         }
-        updatePayload.password = password;
+        updatePayload.password = password; // Do not trim password
     }
 
     try {
@@ -712,12 +735,18 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     if (!email.trim() || !uniqueId.trim() || !displayName.trim() || !position.trim()) {
         setError("Email, System ID, Display Name, and Position are required."); return;
     }
-    if (!/\S+@\S+\.\S+/.test(email)) {
+    if (!/\S+@\S+\.\S+/.test(email.trim())) {
         setError("Please enter a valid email address for the user."); return;
     }
 
     const updatePayload: Partial<User> & { password?: string } = {
-      email, uniqueId, displayName, position, userInterests, phone, notificationPreference, role,
+      email: email.trim(), 
+      uniqueId: uniqueId.trim(), 
+      displayName: displayName.trim(), 
+      position: position.trim(), 
+      userInterests: userInterests?.trim(), 
+      phone: phone?.trim(), 
+      notificationPreference, role,
       organizationId: currentUser.organizationId
     };
 
@@ -725,7 +754,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         if (password !== confirmPassword) { setError("New passwords do not match."); return; }
         const passwordValidationResult = validatePassword(password);
         if (!passwordValidationResult.isValid) { setError(passwordValidationResult.errors.join(" ")); return; }
-        updatePayload.password = password;
+        updatePayload.password = password; // Do not trim password
     }
 
     try {
@@ -735,7 +764,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       });
 
       if (response && response.success && response.user) {
-        const baseUpdatedUser: User = { ...response.user, id: response.user.id || response.user._id!, organizationId: currentUser.organizationId };
+        const baseUpdatedUser: User = {...response.user, id: response.user.id || response.user._id!, organizationId: currentUser.organizationId };
         setUsers(users.map(u => u.id === editingUserId ? baseUpdatedUser : u));
         setSuccessMessage(`User ${baseUpdatedUser.displayName} updated successfully!`);
         setEditingUserId(null); setUserForm(initialUserFormData);
@@ -764,21 +793,27 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     if (!email.trim() || !uniqueId.trim() || !displayName.trim() || !position.trim() || !password.trim() || !confirmPassword.trim()) {
         setError("Email, System ID, Display Name, Position, Password, and Confirm Password are required."); return;
     }
-    if (!/\S+@\S+\.\S+/.test(email)) { setError("Please enter a valid email address."); return; }
+    if (!/\S+@\S+\.\S+/.test(email.trim())) { setError("Please enter a valid email address."); return; }
     if (password !== confirmPassword) { setError("Passwords do not match."); return; }
     const passVal = validatePassword(password);
     if (!passVal.isValid) { setError(passVal.errors.join(" ")); return; }
 
     const newUserData = {
-      email, uniqueId, password,
+      email: email.trim(), 
+      uniqueId: uniqueId.trim(), 
+      password: password, // Do not trim
       role: role,
-      displayName, position, userInterests, phone, notificationPreference,
+      displayName: displayName.trim(), 
+      position: position.trim(), 
+      userInterests: userInterests?.trim(), 
+      phone: phone?.trim(), 
+      notificationPreference,
       referringAdminId: currentUser.id,
       organizationId: currentUser.organizationId
     };
 
     try {
-      const response = await fetchData<{ success: boolean; user: BackendUser; message?: string }>('/users/register', {
+      const response = await fetchData<{ success: boolean; user: BackendUser; message?: string, errors?: Record<string,string> }>('/users/register', {
         method: 'POST',
         body: JSON.stringify(newUserData),
       });
@@ -792,7 +827,12 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         await addAdminLogEntry(`Admin created new user: ${createdUser.displayName}, Role: ${createdUser.role}.`);
         navigateTo(Page.UserManagement);
       } else {
-        setError(response?.message || "Failed to create user.");
+        let mainError = response?.message || "Failed to create user.";
+        if(response?.errors){
+          const fieldErrors = Object.entries(response.errors).map(([field, msg]) => `${field}: ${msg}`).join('; ');
+          mainError = `${mainError} (${fieldErrors})`;
+        }
+        setError(mainError);
       }
     } catch (err:any) {
       setError(err.message || "Failed to create user.");
@@ -811,9 +851,9 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     const roleToApprove = userForm.role || approvingPendingUser.role || 'user';
 
     const approvalData = {
-        position: userForm.position || 'Default Position',
-        userInterests: userForm.userInterests || '',
-        phone: userForm.phone || '',
+        position: userForm.position.trim() || 'Default Position',
+        userInterests: userForm.userInterests?.trim() || '',
+        phone: userForm.phone?.trim() || '',
         notificationPreference: userForm.notificationPreference || 'email',
         role: roleToApprove,
     };
@@ -906,7 +946,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); clearMessages();
     if (!currentUser || !currentUser.organizationId) { setError("Organization context missing."); return; }
     if (!programForm.name.trim() || !programForm.description.trim()) { setError("Program name and description are required."); return; }
-    const newProgramData: Omit<Program, 'id' | 'organizationId'> = { ...programForm };
+    const newProgramData: Omit<Program, 'id' | 'organizationId'> = { name: programForm.name.trim(), description: programForm.description.trim() };
     try {
       const createdProgram = await fetchData<Program>('/programs', { method: 'POST', body: JSON.stringify(newProgramData) });
       if (createdProgram && createdProgram.id) {
@@ -937,7 +977,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     if (!currentUser || !currentUser.organizationId) { setError("Organization context missing."); return; }
     if (!taskForm.title.trim() || !taskForm.description.trim() || !taskForm.requiredSkills.trim()) { setError("Task title, description, and required skills are required."); return; }
     const associatedProgram = programs.find(p => p.id === taskForm.programId);
-    const newTaskData: Partial<Omit<Task, 'id' | 'organizationId'>> = { ...taskForm, deadline: taskForm.deadline ? new Date(taskForm.deadline).toISOString().split('T')[0] : undefined, programName: associatedProgram?.name };
+    const newTaskData: Partial<Omit<Task, 'id' | 'organizationId'>> = { ...taskForm, title: taskForm.title.trim(), description: taskForm.description.trim(), requiredSkills: taskForm.requiredSkills.trim(), deadline: taskForm.deadline ? new Date(taskForm.deadline).toISOString().split('T')[0] : undefined, programName: associatedProgram?.name };
     try {
       const createdTask = await fetchData<Task>('/tasks', { method: 'POST', body: JSON.stringify(newTaskData) });
       if (createdTask && createdTask.id) {
@@ -1115,7 +1155,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
   const handleForgotPassword = async () => {
     clearMessages();
-    const emailToReset = newLoginForm.email;
+    const emailToReset = newLoginForm.email.trim();
     if (!emailToReset || !/\S+@\S+\.\S+/.test(emailToReset)) { setError("Please enter a valid email address."); return; }
     try {
         await fetchData('/users/forgot-password', { method: 'POST', body: JSON.stringify({ email: emailToReset }) });
@@ -1472,7 +1512,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                     return ( <li key={`${assignment.taskId}-${assignment.personId}`} className="bg-surface p-4 rounded-lg shadow-md"> <h3 className={`text-lg font-semibold ${isLate && !isSubmittedLate ? 'text-danger' : 'text-textlight'}`}>{assignment.taskTitle}</h3> {currentUser.role === 'admin' && <p className="text-sm text-neutral">To: <strong>{assignment.personName}</strong></p>} <p className="text-xs text-neutral mt-1">Status: <span className={`font-medium ${assignment.status==='completed_admin_approved'?'text-success':assignment.status==='declined_by_user'?'text-danger':assignment.status.startsWith('submitted')?'text-info':assignment.status==='pending_acceptance'?'text-warning':'text-blue-500' }`}>{assignment.status.replace(/_/g,' ')}</span> {isLate && !isSubmittedLate && <span className="text-danger text-xs font-bold ml-2">(OVERDUE)</span>} {isSubmittedLate && <span className="text-warning text-xs font-bold ml-2">(LATE)</span>} </p> {task && <p className="text-sm text-neutral mt-1">{task.description}</p>} {task?.requiredSkills && <p className="text-xs">Skills: {task.requiredSkills}</p>} {assignment.deadline && <p className="text-xs">Deadline: {new Date(assignment.deadline).toLocaleDateString()}</p>} {assignment.justification && assignment.justification !== 'Manually assigned by admin.' && <p className="text-xs italic">AI: {assignment.justification}</p>} {assignment.userSubmissionDate && <p className="text-xs">Submitted: {new Date(assignment.userSubmissionDate).toLocaleString()}</p>} {assignment.userDelayReason && <p className="text-xs">Delay reason: {assignment.userDelayReason}</p>}
                         <div className="mt-3 pt-3 border-t border-gray-200 space-x-2 flex flex-wrap gap-y-2">
                           {assignment.status === 'pending_acceptance' && assignment.personId === currentUser.id && ( <> <button onClick={() => handleUserAcceptTask(assignment.taskId)} className="btn-success text-sm">Accept</button> <button onClick={() => handleUserDeclineTask(assignment.taskId)} className="btn-danger text-sm">Decline</button> </> )}
-                          {assignment.status === 'accepted_by_user' && assignment.personId === currentUser.id && ( <> {isLate && assignmentToSubmitDelayReason !== `${assignment.taskId}-${assignment.personId}` && ( <button onClick={() => setAssignmentToSubmitDelayReason(`${assignment.taskId}-${assignment.personId}`)} className="btn-warning text-sm">Submit Late</button> )} {assignmentToSubmitDelayReason === `${assignment.taskId}-${assignment.personId}` && isLate && ( <div className="w-full space-y-2 my-2 p-2 border border-warning bg-yellow-50"> <FormTextarea label="Reason for Late Submission:" id={`delayReason-${assignment.taskId}`} value={userSubmissionDelayReason} onChange={e => setUserSubmissionDelayReason(e.target.value)} /> <button onClick={() => handleUserSubmitTask(assignment.taskId, userSubmissionDelayReason)} className="btn-primary text-sm">Confirm</button> <button onClick={() => { setAssignmentToSubmitDelayReason(null); setUserSubmissionDelayReason(''); }} className="btn-neutral text-sm ml-2">Cancel</button> </div> )} {!isLate && ( <button onClick={() => handleUserSubmitTask(assignment.taskId)} className="btn-primary text-sm">Mark Completed</button> )} </> )}
+                          {assignment.status === 'accepted_by_user' && assignment.personId === currentUser.id && ( <> {isLate && assignmentToSubmitDelayReason !== `${assignment.taskId}-${assignment.personId}` && ( <button onClick={() => setAssignmentToSubmitDelayReason(`${assignment.taskId}-${assignment.personId}`)} className="btn-warning text-sm">Submit Late</button> )} {assignmentToSubmitDelayReason === `${assignment.taskId}-${assignment.personId}` && isLate && ( <div className="w-full space-y-2 my-2 p-2 border border-warning bg-yellow-50"> <FormTextarea label="Reason for Late Submission:" id={`delayReason-${assignment.taskId}`} value={userSubmissionDelayReason} onChange={e => setUserSubmissionDelayReason(e.target.value)} /> <button onClick={() => handleUserSubmitTask(assignment.taskId, userSubmissionDelayReason)} className="btn-primary text-sm">Confirm</button <button onClick={() => { setAssignmentToSubmitDelayReason(null); setUserSubmissionDelayReason(''); }} className="btn-neutral text-sm ml-2">Cancel</button> </div> )} {!isLate && ( <button onClick={() => handleUserSubmitTask(assignment.taskId)} className="btn-primary text-sm">Mark Completed</button> )} </> )}
                           {currentUser.role === 'admin' && (assignment.status === 'submitted_on_time' || assignment.status === 'submitted_late') && ( <button onClick={() => handleAdminApproveTaskCompletion(assignment.taskId, assignment.personId)} className="btn-success text-sm">Approve Completion</button> )}
                         </div> </li> );
                   })} </ul> )}
