@@ -25,6 +25,7 @@ export interface User {
   phone?: string; // Optional, can be different from login mechanism
   notificationPreference?: NotificationPreference;
   referringAdminId?: string;
+  organizationId: string; // ID of the organization the user belongs to.
   token?: string; // Optional JWT token for session management
 }
 
@@ -37,12 +38,14 @@ export interface PendingUser {
   role: Role; // Intended role from registration
   submissionDate: string;
   referringAdminId?: string; // Optional: ID of admin who generated pre-reg link, or system if general reg.
+  organizationId: string; // ID of the organization the pending user will belong to.
 }
 
 export interface Program {
   id: string;
   name: string;
   description: string;
+  // organizationId: string; // Implicitly handled by API scoping
 }
 
 export interface Task {
@@ -53,6 +56,7 @@ export interface Task {
   programId?: string;
   programName?: string;
   deadline?: string; // ISO date string (e.g., "YYYY-MM-DD")
+  // organizationId: string; // Implicitly handled by API scoping
 }
 
 export interface Assignment {
@@ -65,6 +69,7 @@ export interface Assignment {
   deadline?: string; // Specific deadline for this assignment instance
   userSubmissionDate?: string; // ISO datetime string when user submitted
   userDelayReason?: string; // User's reason if submitted late
+  // organizationId: string; // Implicitly handled by API scoping
 }
 
 export enum Page {
@@ -95,4 +100,5 @@ export interface AdminLogEntry {
   timestamp: string;
   logText: string;
   imagePreviewUrl?: string;
+  // organizationId: string; // Implicitly handled by API scoping
 }

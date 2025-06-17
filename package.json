@@ -8,9 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "vite"
-
   },
   "dependencies": {
+    "@emailjs/browser": "^4.4.1",
     "@google/genai": "^1.0.1",
     "@grpc/grpc-js": "^1.13.4",
     "bcryptjs": "^3.0.2",
