@@ -10,7 +10,8 @@ import LoadingSpinner from './components/LoadingSpinner';
 import { UsersIcon, ClipboardListIcon, LightBulbIcon, CheckCircleIcon, TrashIcon, PlusCircleIcon, KeyIcon, BriefcaseIcon, LogoutIcon, UserCircleIcon } from './components/Icons';
 import PreRegistrationFormPage from './components/PreRegistrationFormPage';
 import UserTour from './components/UserTour';
-import Sidebar from './components/Sidebar'; // Import the new Sidebar component
+// import Sidebar from './components/Sidebar'; // Sidebar is replaced by TopNavbar
+import TopNavbar from './components/TopNavbar'; // Import the new TopNavbar component
 
 const API_BASE_URL = 'https://task-management-backend-17a5.onrender.com';
 const JWT_TOKEN_KEY = 'task-assign-jwt';
@@ -1249,18 +1250,18 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
 
   return (
-    <div className="flex h-screen bg-bground main-app-scope">
+    <div className="flex flex-col h-screen bg-bground main-app-scope">
        {isLoadingAppData && <div className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-70 flex items-center justify-center z-[100]"><LoadingSpinner /><p className="text-white ml-3 text-lg">Loading data...</p></div>}
        {showUserTour && currentUser && <UserTour user={currentUser} onClose={handleCompleteUserTour} />}
       
-      <Sidebar 
+      <TopNavbar
         currentUser={currentUser}
         currentPage={currentPage}
         navigateTo={navigateTo}
         handleLogout={handleLogout}
       />
 
-      <main className="flex-1 p-6 overflow-y-auto">
+      <main className="flex-1 p-6 overflow-y-auto"> {/* Removed `main-app-scope` from here as it's on the root */}
         <UIMessages />
 
         {currentPage === Page.Dashboard && currentUser.role === 'admin' && (
