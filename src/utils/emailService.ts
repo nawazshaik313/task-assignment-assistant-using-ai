@@ -40,12 +40,12 @@ const sendEmail = async (templateId, templateParams) => {
 // --- Specific Email Sending Functions ---
 
 // Called from userRoutes.js after successful registration
-exports.sendWelcomeRegistrationEmail = async (email, displayName, role, organizationName = '') => {
+exports.sendWelcomeRegistrationEmail = async (email, displayName, role, companyName = '') => { // Changed organizationName to companyName
   const templateParams = {
     to_email: email,
     to_name: displayName,
     user_role: role,
-    organization_name: organizationName, // For admins creating new site
+    company_name: companyName, // For admins creating new site, changed from organization_name
     login_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}#LOGIN` // Assumes frontend URL is in env
   };
   return sendEmail(process.env.EMAILJS_TEMPLATE_WELCOME, templateParams);
