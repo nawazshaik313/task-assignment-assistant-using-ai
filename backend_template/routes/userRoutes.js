@@ -4,11 +4,11 @@ const router = express.Router();
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const { verifyToken, isAdmin } = require('../middleware/auth'); // Correct path to middleware
+const mongoose = require('mongoose'); // For generating ObjectId
 
-// User Registration (Primarily for initial admin, or if general registration directly creates users)
-// For a flow where users are approved from PendingUsers, this might be less used or admin-only.
+// User Registration
 router.post('/register', async (req, res) => {
-  const { email, uniqueId, password, displayName, role, position, userInterests, phone, notificationPreference, referringAdminId } = req.body;
+  const { email, uniqueId, password, displayName, role, position, userInterests, phone, notificationPreference, referringAdminId, organizationName /* For UI, not directly for org ID logic */ } = req.body;
 
   if (!email || !uniqueId || !password || !displayName) {
     return res.status(400).json({ success: false, message: 'Email, Unique ID, Password, and Display Name are required.' });
@@ -17,28 +17,35 @@ router.post('/register', async (req, res) => {
   try {
     let existingUser = await User.findOne({ $or: [{ email: email.toLowerCase() }, { uniqueId }] });
     if (existingUser) {
-      return res.status(400).json({ success: false, message: 'User with this email or unique ID already exists.' });
+      // Check if the existing user is within the same potential organization context if applicable
+      // For now, global uniqueness for email/uniqueId is simpler to maintain initially.
+      return res.status(400).json({ success: false, message: 'User with this email or unique ID already exists globally.' });
     }
 
-    // Determine role: if no admins exist, first user is admin.
-    // If an admin attempts to register another admin when one exists, it should be an error.
-    const adminCount = await User.countDocuments({ role: 'admin' });
-    let finalRole = role || 'user'; // Default to user if role not provided
+    let finalRole = role || 'user';
+    let organizationIdToSet;
+    let isNewOrganization = false;
 
     if (finalRole === 'admin') {
-      if (adminCount > 0) {
-        // This case should ideally be caught by frontend for admin-initiated creation.
-        // For public registration, frontend also controls this.
-        // If somehow 'admin' role is sent when one exists, block it.
-        return res.status(400).json({ success: false, message: 'An administrator account already exists. Cannot register another admin.' });
+      // A new admin registration implies creating a new organization/site.
+      // The organizationId will be this new admin's own userId.
+      organizationIdToSet = new mongoose.Types.ObjectId().toString(); // Placeholder, will be replaced by newUser.id
+      isNewOrganization = true;
+    } else if (referringAdminId) {
+      // User is being registered via referral or by an existing admin.
+      // They should inherit the referring admin's organizationId.
+      const referrer = await User.findById(referringAdminId);
+      if (!referrer || !referrer.organizationId) {
+        return res.status(400).json({ success: false, message: 'Referring admin not found or has no organization.' });
       }
-      // First admin, role remains 'admin'
-    } else if (adminCount === 0 && (req.path === '/register' && !role)) {
-      // If it's the very first user registering publicly and no role specified, make them admin.
-      // This might be specific to initial setup.
-      finalRole = 'admin';
+      organizationIdToSet = referrer.organizationId;
+    } else {
+      // General user registration without a referrer - this flow needs careful consideration in multi-tenancy.
+      // For now, disallow general user registration without an organization context.
+      // Or, have a default organization, or require an organization selection.
+      // To keep it simple: assume users are either admins creating their own org, or referred into one.
+      return res.status(400).json({ success: false, message: 'User registration requires an organizational context (e.g., referral or admin setup).' });
     }
-
 
     const newUser = new User({
       email,
@@ -50,17 +57,21 @@ router.post('/register', async (req, res) => {
       userInterests,
       phone,
       notificationPreference,
-      referringAdminId
+      referringAdminId: finalRole === 'user' ? referringAdminId : null, // Only relevant for users under an admin
+      organizationId: isNewOrganization ? "" : organizationIdToSet // Temporary for new admin, will update post-save
     });
 
+    if (isNewOrganization) {
+        newUser.organizationId = newUser.id; // New admin's ID becomes their organization ID
+    }
+    
     await newUser.save();
     
-    // Don't send token on registration, user should log in.
     res.status(201).json({ success: true, message: 'User registered successfully.', user: newUser.toJSON() });
 
   } catch (error) {
     console.error("User registration error:", error);
-    if (error.code === 11000) { // MongoDB duplicate key error
+    if (error.code === 11000) { 
         return res.status(400).json({ success: false, message: 'Email or Unique ID already exists.' });
     }
     res.status(500).json({ success: false, message: 'Server error during registration.', error: error.message });
@@ -85,19 +96,18 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid credentials.' });
     }
 
-    // Explicitly check for JWT_SECRET before attempting to sign a token
     if (!process.env.JWT_SECRET) {
         console.error("FATAL ERROR: JWT_SECRET environment variable is not defined.");
-        // Do not expose details of the error to the client, keep it generic.
         return res.status(500).json({ success: false, message: 'Server configuration error. Please contact administrator.' });
     }
 
     const tokenPayload = {
-      id: user.id, // Use virtual 'id'
+      id: user.id, 
       email: user.email,
       role: user.role,
       displayName: user.displayName,
-      uniqueId: user.uniqueId
+      uniqueId: user.uniqueId,
+      organizationId: user.organizationId // Include organizationId in token
     };
     const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '2h' });
 
@@ -105,29 +115,30 @@ router.post('/login', async (req, res) => {
       success: true,
       message: 'Login successful.',
       token,
-      user: tokenPayload // Send back the payload as user object
+      user: tokenPayload // Send user details including organizationId
     });
   } catch (error) {
-    console.error("Login error:", error); // Log the actual error on the server
+    console.error("Login error:", error); 
     res.status(500).json({ success: false, message: 'Server error during login.' });
   }
 });
 
 // User Logout (Conceptual - JWTs are managed client-side)
 router.post('/logout', (req, res) => {
-  // For JWT, logout is primarily a client-side action (deleting the token).
-  // Backend can have a route for completeness or if using refresh tokens/blacklisting.
   res.json({ success: true, message: 'Logged out successfully (client-side action required).' });
 });
 
 // Get Current Logged-in User
 router.get('/current', verifyToken, async (req, res) => {
   try {
-    // req.user is populated by verifyToken middleware
-    const user = await User.findById(req.user.id).select('-password'); // Exclude password
+    // req.user from token already has id, role, organizationId etc.
+    // Fetch from DB to get latest full profile, excluding password
+    const user = await User.findById(req.user.id).select('-password'); 
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
+    // Ensure the organizationId from DB matches token, or send what's in DB.
+    // For consistency, user.toJSON() will use the DB version.
     res.json(user.toJSON());
   } catch (error) {
     console.error("Get current user error:", error);
@@ -135,41 +146,50 @@ router.get('/current', verifyToken, async (req, res) => {
   }
 });
 
-// Get all users (Admin only)
+// Get all users (Admin only, scoped to their organization)
 router.get('/', [verifyToken, isAdmin], async (req, res) => {
   try {
-    const users = await User.find().select('-password');
+    if (!req.user.organizationId) {
+        return res.status(403).json({ success: false, message: 'Organization context missing for admin.' });
+    }
+    const users = await User.find({ organizationId: req.user.organizationId }).select('-password');
     res.json(users.map(u => u.toJSON()));
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
 
-// Endpoint for frontend to check admin existence during registration
+// This endpoint is problematic in multi-tenant. Each org has its own admin state.
+// Removing for now, as "global admin status" doesn't fit.
+// Client-side logic for "first admin" hints would need to be re-evaluated.
+/*
 router.get('/all-for-status-check', async (req, res) => {
   try {
-    // Only return a minimal set of data, or just the count, to avoid exposing all user data publicly.
-    // For this purpose, returning all users (even if minimal fields) might be okay for a small app,
-    // but for larger apps, a dedicated `GET /users/status/admin-exists` endpoint would be better.
-    const users = await User.find().select('role'); // Only select role to check for admin
-    res.json(users.map(u => ({ role: u.role, id: u.id }))); // Send minimal data
+    // This needs to be rethought for multi-tenancy.
+    // Perhaps it checks if ANY admin exists in ANY org, or a specific org.
+    // For now, returning an empty array or an error might be safest.
+    res.status(501).json({ success: false, message: 'Endpoint under review for multi-tenancy compatibility.' });
   } catch (error) {
     console.error("Error fetching users for status check:", error);
     res.status(500).json({ success: false, message: 'Server error while checking user status.' });
   }
 });
+*/
 
 
-// Get user by ID (Protected)
+// Get user by ID (Protected, scoped to organization)
 router.get('/:id', verifyToken, async (req, res) => {
   try {
-    // Admin can get any user, regular user can only get their own profile via /current
-    if (req.user.role !== 'admin' && req.user.id !== req.params.id) {
-        return res.status(403).json({ success: false, message: 'Forbidden: You can only view your own profile or an admin can view any profile.' });
+    if (!req.user.organizationId) {
+        return res.status(403).json({ success: false, message: 'Organization context missing.' });
     }
-    const user = await User.findById(req.params.id).select('-password');
+    const user = await User.findOne({ _id: req.params.id, organizationId: req.user.organizationId }).select('-password');
     if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found.' });
+      return res.status(404).json({ success: false, message: 'User not found in your organization.' });
+    }
+     // Admin can view any user in their org. Non-admin can only view their own.
+    if (req.user.role !== 'admin' && req.user.id !== req.params.id) {
+        return res.status(403).json({ success: false, message: 'Forbidden: You can only view your own profile.' });
     }
     res.json(user.toJSON());
   } catch (error) {
@@ -177,34 +197,42 @@ router.get('/:id', verifyToken, async (req, res) => {
   }
 });
 
-// Update user by ID (Protected)
-// Users can update their own profile. Admins can update any profile.
+// Update user by ID (Protected, scoped to organization)
 router.put('/:id', verifyToken, async (req, res) => {
   const { email, uniqueId, displayName, position, userInterests, phone, notificationPreference, role, password } = req.body;
   const userIdToUpdate = req.params.id;
 
+  if (!req.user.organizationId) {
+    return res.status(403).json({ success: false, message: 'Organization context missing.' });
+  }
+  // User can update their own profile. Admin can update any user in their org.
   if (req.user.id !== userIdToUpdate && req.user.role !== 'admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden: You can only update your own profile or an admin can update any profile.' });
+    return res.status(403).json({ success: false, message: 'Forbidden: Insufficient permissions.' });
   }
 
   try {
-    const user = await User.findById(userIdToUpdate);
+    const user = await User.findOne({ _id: userIdToUpdate, organizationId: req.user.organizationId });
     if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found.' });
+      return res.status(404).json({ success: false, message: 'User not found in your organization.' });
     }
 
-    // Check for unique fields if changed
-    if (email && email.toLowerCase() !== user.email) { // compare lowercase
-        const existingByEmail = await User.findOne({ email: email.toLowerCase() });
+    // Prevent non-admins from updating other users in the same org, even if they somehow bypass client checks
+    if (req.user.role !== 'admin' && req.user.id !== user.id.toString()) {
+        return res.status(403).json({ success: false, message: 'Forbidden: You can only update your own profile.' });
+    }
+
+
+    if (email && email.toLowerCase() !== user.email) { 
+        const existingByEmail = await User.findOne({ email: email.toLowerCase(), organizationId: req.user.organizationId });
         if (existingByEmail && existingByEmail.id !== userIdToUpdate) {
-            return res.status(400).json({ success: false, message: 'Email already in use.' });
+            return res.status(400).json({ success: false, message: 'Email already in use within your organization.' });
         }
         user.email = email.toLowerCase();
     }
     if (uniqueId && uniqueId !== user.uniqueId) {
-        const existingByUniqueId = await User.findOne({ uniqueId });
+        const existingByUniqueId = await User.findOne({ uniqueId, organizationId: req.user.organizationId });
         if (existingByUniqueId && existingByUniqueId.id !== userIdToUpdate) {
-            return res.status(400).json({ success: false, message: 'Unique ID already in use.' });
+            return res.status(400).json({ success: false, message: 'Unique ID already in use within your organization.' });
         }
         user.uniqueId = uniqueId;
     }
@@ -215,70 +243,55 @@ router.put('/:id', verifyToken, async (req, res) => {
     if (phone !== undefined) user.phone = phone;
     if (notificationPreference) user.notificationPreference = notificationPreference;
     
-    // Role change logic:
-    if (req.user.role === 'admin' && role) { // Admin is attempting to set a role
-        const targetUserIsAdmin = user.role === 'admin';
-        if (role === 'admin') { // Trying to make/keep target user an admin
-            if (!targetUserIsAdmin) { // If promoting a user to admin
-                const adminCount = await User.countDocuments({ role: 'admin' });
-                if (adminCount > 0) { // An admin already exists
-                    return res.status(400).json({ success: false, message: 'An administrator account already exists. Cannot promote another user to admin.' });
-                }
+    if (req.user.role === 'admin' && role) {
+        if (role === 'user' && user.role === 'admin') {
+            const adminCountInOrg = await User.countDocuments({ role: 'admin', organizationId: req.user.organizationId });
+            if (adminCountInOrg <= 1 && user.id === userIdToUpdate) { 
+                return res.status(400).json({ success: false, message: 'The sole administrator of this organization cannot be demoted.' });
             }
-            user.role = 'admin';
-        } else if (role === 'user') { // Trying to make target user a 'user'
-            if (targetUserIsAdmin) { // If demoting an admin
-                // Check if this is the sole admin
-                const adminCount = await User.countDocuments({ role: 'admin' });
-                if (adminCount === 1 && user.id === userIdToUpdate) { // Target is the SOLE admin
-                    return res.status(400).json({ success: false, message: 'The sole administrator cannot be demoted to user.' });
-                }
-            }
-            user.role = 'user';
         }
+        user.role = role;
     } else if (role && user.role !== role && req.user.id === userIdToUpdate) {
-        // Non-admin user trying to change their own role OR admin trying to change their own role (which should be via profile, but not role)
-        return res.status(403).json({ success: false, message: 'Role modification not permitted for your own account here or by non-admins.' });
+        return res.status(403).json({ success: false, message: 'Role modification not permitted for your own account here.' });
     }
 
-
-    if (password) { // If password is being updated
-      user.password = password; // The pre-save hook will hash it
+    if (password) { 
+      user.password = password; 
     }
 
     const updatedUser = await user.save();
     res.json({ success: true, message: 'User updated successfully.', user: updatedUser.toJSON() });
   } catch (error) {
     console.error("Update user error:", error);
-    if (error.code === 11000) { // MongoDB duplicate key error
-        return res.status(400).json({ success: false, message: 'Email or Unique ID already exists.' });
+    if (error.code === 11000) { 
+        return res.status(400).json({ success: false, message: 'Email or Unique ID already exists within the organization.' });
     }
     res.status(500).json({ success: false, message: 'Server error while updating user.', error: error.message });
   }
 });
 
-// Delete user by ID (Admin only)
+// Delete user by ID (Admin only, scoped to organization)
 router.delete('/:id', [verifyToken, isAdmin], async (req, res) => {
   try {
-    const userToDelete = await User.findById(req.params.id);
-    if (!userToDelete) {
-      return res.status(404).json({ success: false, message: 'User not found.' });
+    if (!req.user.organizationId) {
+        return res.status(403).json({ success: false, message: 'Organization context missing for admin.' });
     }
-    // Prevent admin from deleting their own account
+    const userToDelete = await User.findOne({ _id: req.params.id, organizationId: req.user.organizationId });
+    if (!userToDelete) {
+      return res.status(404).json({ success: false, message: 'User not found in your organization.' });
+    }
     if (req.user.id === req.params.id) {
         return res.status(400).json({ success: false, message: "Admins cannot delete their own account." });
     }
-    // Prevent deletion if the user is the sole admin
     if (userToDelete.role === 'admin') {
-        const adminCount = await User.countDocuments({ role: 'admin' });
-        if (adminCount === 1) {
-            return res.status(400).json({ success: false, message: "Cannot delete the sole administrator account." });
+        const adminCountInOrg = await User.countDocuments({ role: 'admin', organizationId: req.user.organizationId });
+        if (adminCountInOrg <= 1) {
+            return res.status(400).json({ success: false, message: "Cannot delete the sole administrator of this organization." });
         }
     }
     
-    await User.findByIdAndDelete(req.params.id);
-    // TODO: Consider what happens to assignments or other related data.
-    // For now, just deleting the user.
+    await User.deleteOne({ _id: req.params.id, organizationId: req.user.organizationId });
+    // TODO: Consider deleting related assignments or other user-specific data from this organization.
     res.json({ success: true, message: 'User deleted successfully.' });
   } catch (error) {
     console.error("Delete user error:", error);
@@ -287,16 +300,19 @@ router.delete('/:id', [verifyToken, isAdmin], async (req, res) => {
 });
 
 
-// Forgot Password Request (generates a token, sends email - actual email sending not implemented here)
+// Forgot Password Request (scoped to organization if possible, or global for simplicity)
 router.post('/forgot-password', async (req, res) => {
     const { email } = req.body;
+    // For multi-tenancy, you might require an organization identifier here too,
+    // or assume email is globally unique for password reset.
+    // Simpler: assume email is the primary lookup.
     if (!email) {
         return res.status(400).json({ success: false, message: 'Email is required.' });
     }
     try {
         const user = await User.findOne({ email: email.toLowerCase() });
         if (!user) {
-            // Still return a generic message to prevent email enumeration
+            // Standard practice: don't reveal if email exists or not for security.
             return res.status(200).json({ success: true, message: 'If an account with that email exists, a password reset link has been sent.' });
         }
         
@@ -305,13 +321,15 @@ router.post('/forgot-password', async (req, res) => {
             return res.status(500).json({ success: false, message: 'Server configuration error for password reset.' });
         }
 
-        // Create a short-lived reset token (example, not cryptographically secure for production without more)
-        // In a real app, use a crypto-secure random string, store its hash with an expiry in the DB.
-        const resetToken = jwt.sign({ id: user.id, type: 'password_reset' }, process.env.JWT_SECRET, { expiresIn: '15m' }); 
+        // Token includes user ID and org ID for context if needed in reset form.
+        const resetToken = jwt.sign(
+            { id: user.id, organizationId: user.organizationId, type: 'password_reset' }, 
+            process.env.JWT_SECRET, 
+            { expiresIn: '15m' }
+        ); 
         
-        // TODO: Implement actual email sending here with the resetToken
-        console.log(`Password reset requested for ${email}. Token: ${resetToken}. Link should be: /reset-password?token=${resetToken}`);
-        // Example: await sendPasswordResetEmail(user.email, resetToken);
+        console.log(`Password reset requested for ${email} in org ${user.organizationId}. Token: ${resetToken}. Link should be: /reset-password?token=${resetToken}`);
+        // Here you would send an email with the reset link.
 
         res.status(200).json({ success: true, message: 'If an account with that email exists, a password reset link has been sent.' });
     } catch (error) {
@@ -321,7 +339,7 @@ router.post('/forgot-password', async (req, res) => {
 });
 
 
-// (Optional) Route to handle actual password reset with a token
+// Reset Password (requires token from forgot password flow)
 router.post('/reset-password', async (req, res) => {
     const { token, newPassword } = req.body;
     if (!token || !newPassword) {
@@ -334,22 +352,22 @@ router.post('/reset-password', async (req, res) => {
             return res.status(500).json({ success: false, message: 'Server configuration error for password reset.' });
         }
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        // Verify this token was intended for password reset (if you add a 'type' field during signing)
-        if (decoded.type !== 'password_reset') {
-             return res.status(400).json({ success: false, message: 'Invalid token type.' });
+        if (decoded.type !== 'password_reset' || !decoded.id || !decoded.organizationId) {
+             return res.status(400).json({ success: false, message: 'Invalid or malformed reset token.' });
         }
 
-        const user = await User.findById(decoded.id);
+        // Find user by ID AND organizationId to ensure context.
+        const user = await User.findOne({ _id: decoded.id, organizationId: decoded.organizationId });
 
         if (!user) {
-            return res.status(400).json({ success: false, message: 'Invalid or expired reset token (user not found).' });
+            return res.status(400).json({ success: false, message: 'Invalid or expired reset token (user not found or org mismatch).' });
         }
 
-        user.password = newPassword; // Pre-save hook will hash
+        user.password = newPassword; 
         await user.save();
 
         res.json({ success: true, message: 'Password has been reset successfully.' });
-    } catch (error) { // Catches JWT errors (expired, invalid) and DB errors
+    } catch (error) { 
         console.error("Reset password error:", error);
         res.status(400).json({ success: false, message: 'Invalid or expired reset token, or server error.' });
     }

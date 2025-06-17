@@ -72,6 +72,7 @@ interface BackendPendingUser {
   role: Role;
   submissionDate: string;
   referringAdminId?: string;
+  organizationId?: string;
 }
 
 // Interface to represent the structure of a user object from the backend (e.g., after creation)
@@ -88,6 +89,7 @@ interface BackendUser {
   phone?: string;
   notificationPreference?: NotificationPreference;
   referringAdminId?: string;
+  organizationId: string; // Now required
   // token?: string; // Token is part of the login response root, not nested in user object
 }
 
@@ -132,15 +134,10 @@ const fetchData = async <T,>(endpoint: string, options: RequestInit = {}, defaul
     });
 
     if (response.status === 204) { // No Content
-      return defaultReturnVal !== null ? defaultReturnVal : ({} as T);
+      return defaultReturnVal;
     }
 
-    // Check for unauthorized specifically to handle token expiry or invalid token
     if (response.status === 401 || response.status === 403) {
-        // Could trigger logout or token refresh logic here
-        localStorage.removeItem(JWT_TOKEN_KEY); // Remove potentially invalid token
-        // Potentially redirect to login: window.location.hash = Page.Login;
-        // For now, just throw an error that can be caught by callers
         const errorText = await response.text();
         let errorData: any = null;
         try { errorData = JSON.parse(errorText); } catch (e) { /* use raw text */ }
@@ -166,14 +163,11 @@ const fetchData = async <T,>(endpoint: string, options: RequestInit = {}, defaul
     }
 
     if (!responseText) {
-      return defaultReturnVal !== null ? defaultReturnVal : ({} as T);
+      return defaultReturnVal;
     }
 
     const parsedData = JSON.parse(responseText);
-    // If backend wraps data in a 'data' or 'user' field, or includes success flags
-    // e.g. if (parsedData.success === false && parsedData.message) throw new Error(parsedData.message);
-    // return parsedData.data || parsedData.user || parsedData as T;
-    return parsedData as T; // Assuming direct data return for now
+    return parsedData as T;
   } catch (error) {
     console.error(`Network or parsing error for ${endpoint}:`, error);
      if (error instanceof Error && error.message.includes("Failed to fetch")) {
@@ -194,30 +188,32 @@ export const App = (): JSX.Element => {
   const [programs, setPrograms] = useState<Program[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [adminLogs, setAdminLogs] = useState<AdminLogEntry[]>([]);
-  const [isLoadingAppData, setIsLoadingAppData] = useState<boolean>(true); // Start true
+  const [isLoadingAppData, setIsLoadingAppData] = useState<boolean>(true); 
 
 
   const [authView, setAuthView] = useState<'login' | 'register'>('login');
   const [newLoginForm, setNewLoginForm] = useState({ email: '', password: '' });
   const [newRegistrationForm, setNewRegistrationForm] = useState({
-    name: '', // Corresponds to displayName
+    name: '', 
     email: '',
     password: '',
     confirmPassword: '',
-    role: 'user' as Role, // Default role for new registrations
+    role: 'user' as Role, 
     uniqueId: '', 
-    position: '', 
+    position: '',
+    organizationName: '', // For admin UI when creating new "site"
   });
 
   const [adminRegistrationForm, setAdminRegistrationForm] = useState(initialAdminRegistrationState);
   const [preRegistrationForm, setPreRegistrationFormInternal] = useLocalStorage('task-assign-preRegistrationForm',initialPreRegistrationFormState);
 
-  const initialUserFormData = {
-      email: '', uniqueId: '', password: '', confirmPassword: '',
+  const initialUserFormData: User & { confirmPassword?: string} = {
+      id: '', email: '', uniqueId: '', password: '', confirmPassword: '',
       displayName: '', position: '', userInterests: '',
       phone: '', notificationPreference: 'none' as NotificationPreference,
       role: 'user' as Role, 
-      referringAdminId: ''
+      referringAdminId: '',
+      organizationId: '' // Will be set from currentUser or context
   };
   const [userForm, setUserForm] = useState<typeof initialUserFormData>(initialUserFormData);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -256,81 +252,112 @@ export const App = (): JSX.Element => {
     }
   };
 
-  const getAdminExists = () => users.some(u => u.role === 'admin');
+  // getAdminExists is no longer globally relevant in multi-tenant.
+  // Each organization manages its own admins.
+  // const getAdminExists = () => users.some(u => u.role === 'admin');
 
 
-  const loadInitialData = useCallback(async (loggedInUser?: User) => {
+  const loadInitialData = useCallback(async (loggedInUserTokenData?: User) => { // Token data includes orgId
     setIsLoadingAppData(true);
     try {
-      let activeUser = loggedInUser;
-      if (!activeUser) {
+      let activeUserWithFullProfile: User | null = null;
+      
+      if (loggedInUserTokenData && loggedInUserTokenData.token) {
+          // Use token data to set currentUser initially, then fetch full profile
+          setCurrentUserInternal(loggedInUserTokenData); 
+          // Fetch full profile to ensure all fields are up-to-date
+          const userFromServer = await fetchData<BackendUser>('/users/current', {}, null);
+          if (userFromServer) {
+            activeUserWithFullProfile = { ...userFromServer, id: userFromServer.id || userFromServer._id!, token: loggedInUserTokenData.token };
+            setCurrentUserInternal(activeUserWithFullProfile); // Update with full profile
+          } else { // Token might be valid but user deleted, or other issue
+            localStorage.removeItem(JWT_TOKEN_KEY);
+            setCurrentUserInternal(null);
+          }
+      } else {
         const token = localStorage.getItem(JWT_TOKEN_KEY);
         if (token) {
-          const userFromServer = await fetchData<User>('/users/current', {}, null);
-          if (userFromServer) {
-            activeUser = { ...userFromServer, token };
-          }
+          // Attempt to validate token and get user data including orgId
+          // The /users/current endpoint now expects a token that resolves to a user with an orgId
+           const userFromServer = await fetchData<BackendUser>('/users/current', {}, null);
+           if (userFromServer) {
+             activeUserWithFullProfile = { ...userFromServer, id: userFromServer.id || userFromServer._id!, token };
+             setCurrentUserInternal(activeUserWithFullProfile);
+           } else { // Token invalid or user not found
+             localStorage.removeItem(JWT_TOKEN_KEY);
+             setCurrentUserInternal(null);
+           }
         }
       }
-
-      setCurrentUserInternal(activeUser);
       
-      let loadedUsersData: User[] = [];
-
-      if (activeUser) {
+      if (activeUserWithFullProfile) {
+        // All fetches will be scoped by the backend using the token's organizationId
         const [
           loadedUsers, loadedPendingUsers, loadedTasks, loadedPrograms, loadedAssignments, loadedAdminLogs,
         ] = await Promise.all([
           fetchData<User[]>('/users', {}, []),
-          activeUser.role === 'admin' ? fetchData<PendingUser[]>('/pending-users', {}, []) : Promise.resolve([]),
+          activeUserWithFullProfile.role === 'admin' ? fetchData<PendingUser[]>('/pending-users', {}, []) : Promise.resolve([]),
           fetchData<Task[]>('/tasks', {}, []),
           fetchData<Program[]>('/programs', {}, []),
           fetchData<Assignment[]>('/assignments', {}, []),
-          activeUser.role === 'admin' ? fetchData<AdminLogEntry[]>('/admin-logs', {}, []) : Promise.resolve([]),
+          activeUserWithFullProfile.role === 'admin' ? fetchData<AdminLogEntry[]>('/admin-logs', {}, []) : Promise.resolve([]),
         ]);
 
-        loadedUsersData = loadedUsers || [];
-        setUsers(loadedUsersData);
+        setUsers(loadedUsers || []);
         setPendingUsers(loadedPendingUsers || []);
         setTasks(loadedTasks || []);
         setPrograms(loadedPrograms || []);
         setAssignments(loadedAssignments || []);
         setAdminLogs(loadedAdminLogs || []);
-        
       } else {
-        // No user logged in, fetch all users only to check if any admin exists for initial setup guidance
-        // This is a minimal fetch for that purpose.
-        const allUsersResponse = await fetchData<User[]>('/users/all-for-status-check', {}, []); 
-        loadedUsersData = allUsersResponse || [];
-        setUsers(loadedUsersData); // Store this minimal list for getAdminExists()
-        setPendingUsers([]); setTasks([]); setPrograms([]); setAssignments([]); setAdminLogs([]);
+        // No user logged in, clear all app data
+        setUsers([]); setPendingUsers([]); setTasks([]); setPrograms([]); setAssignments([]); setAdminLogs([]);
       }
-      
-      // Update newRegistrationForm role based on admin existence (for initial setup guidance)
-      // This doesn't prevent creating admins if the form allows it.
-      if (!loadedUsersData.some(u => u.role === 'admin')) {
-          setNewRegistrationForm(prev => ({ ...prev, role: 'admin' })); 
-      } else {
-          setNewRegistrationForm(prev => ({ ...prev, role: 'user' })); // Default new users to 'user' role
-      }
-
       console.log("Initial data processed based on user session.");
     } catch (err: any) {
       console.error("Critical error during initial data load:", err);
       setError("Failed to load application data. Error: " + err.message);
-      if (err.message.includes("Authentication/Authorization failed")) {
-        setCurrentUser(null);
+      if (err.message.includes("Authentication/Authorization failed") || err.message.includes("Token is missing organization information")) {
+        setCurrentUser(null); // This will also remove JWT_TOKEN_KEY
         navigateTo(Page.Login);
+      } else {
+        // For other errors, keep user logged in if they were, but show error
       }
-      setUsers([]); setPendingUsers([]); setTasks([]); setPrograms([]); setAssignments([]); setAdminLogs([]);
     } finally {
       setIsLoadingAppData(false);
     }
   }, []); 
 
   useEffect(() => {
-    loadInitialData();
-  }, [loadInitialData]);
+    // Attempt to load user from token on initial app load if no currentUser is set yet
+    if (!currentUser) {
+        const token = localStorage.getItem(JWT_TOKEN_KEY);
+        if (token) {
+            try {
+                // Quick parse of token to get basic info for loadInitialData,
+                // actual validation happens in loadInitialData via /users/current
+                const base64Url = token.split('.')[1];
+                const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+                    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+                }).join(''));
+                const decodedTokenUser = JSON.parse(jsonPayload) as User; // Assuming User structure matches token
+                if (decodedTokenUser && decodedTokenUser.id && decodedTokenUser.organizationId) {
+                     loadInitialData({ ...decodedTokenUser, token });
+                } else {
+                    localStorage.removeItem(JWT_TOKEN_KEY); // Invalid token structure
+                    loadInitialData(); // Load as logged out
+                }
+            } catch (e) {
+                console.error("Failed to parse token from localStorage", e);
+                localStorage.removeItem(JWT_TOKEN_KEY);
+                loadInitialData(); // Load as logged out
+            }
+        } else {
+            loadInitialData(); // No token, load as logged out
+        }
+    }
+  }, [loadInitialData, currentUser]);
 
 
   const setPreRegistrationForm = (value: React.SetStateAction<typeof initialPreRegistrationFormState>) => {
@@ -351,17 +378,18 @@ export const App = (): JSX.Element => {
 
       if (targetPageFromHashPath === Page.PreRegistration) {
         const refAdminIdFromHash = params.get('refAdminId');
+        // Pre-reg link implies the user is joining an existing organization.
+        // We'd need to fetch the admin's org details or pass orgId in the link too.
+        // For now, relies on backend to associate with correct org via refAdminId.
         const adminUser = users.find(u => u.id === refAdminIdFromHash && u.role === 'admin');
+
 
         setPreRegistrationForm(prev => ({
           ...initialPreRegistrationFormState,
           referringAdminId: refAdminIdFromHash || '',
           referringAdminDisplayName: adminUser ? adminUser.displayName : (refAdminIdFromHash ? `Admin ID: ${refAdminIdFromHash}`: 'an administrator'),
-          isReferralLinkValid: !!refAdminIdFromHash && !!adminUser 
+          isReferralLinkValid: !!refAdminIdFromHash // Simpler validation, backend will confirm admin and org
         }));
-        if (!refAdminIdFromHash || !adminUser) {
-          setError("Pre-registration link is invalid, missing administrator reference, or the referring admin is no longer valid.");
-        }
         _setCurrentPageInternal(Page.PreRegistration);
         return;
       }
@@ -411,6 +439,7 @@ export const App = (): JSX.Element => {
   useEffect(() => {
     if (currentPage === Page.UserProfile && currentUser) {
       setUserForm({
+        id: currentUser.id,
         email: currentUser.email,
         uniqueId: currentUser.uniqueId,
         displayName: currentUser.displayName,
@@ -421,18 +450,20 @@ export const App = (): JSX.Element => {
         role: currentUser.role,
         password: '',
         confirmPassword: '',
-        referringAdminId: currentUser.referringAdminId || ''
+        referringAdminId: currentUser.referringAdminId || '',
+        organizationId: currentUser.organizationId
       });
     }
   }, [currentPage, currentUser]);
 
   const getAdminToNotify = useCallback((referringAdminId?: string): User | undefined => {
+    // In multi-tenant, admin notifications should be scoped to the organization.
+    // For now, if referringAdminId is provided and exists in current users list (which is org-scoped), use that.
+    // Otherwise, find any admin in the current (org-scoped) users list.
     if (referringAdminId) {
       const refAdmin = users.find(u => u.id === referringAdminId && u.role === 'admin');
       if (refAdmin) return refAdmin;
     }
-    // Fallback to any admin if specific one not found or not provided.
-    // In a multi-tenant system, this might need refinement to target the correct organizational admin.
     return users.find(u => u.role === 'admin'); 
   }, [users]);
 
@@ -440,11 +471,15 @@ const handleNewRegistration = async (e: React.FormEvent) => {
   e.preventDefault();
   clearMessages();
 
-  const { name, email, password, confirmPassword, uniqueId, position, role } = newRegistrationForm;
+  const { name, email, password, confirmPassword, uniqueId, position, role, organizationName } = newRegistrationForm;
 
   if (!name.trim() || !email.trim() || !password.trim() || !confirmPassword.trim() || !uniqueId.trim()) {
     setError("Full Name, Email, Password, Confirm Password, and System ID are required.");
     return;
+  }
+  if (role === 'admin' && !organizationName.trim()) {
+      setError("Organization Name is required when registering as an Administrator for a new site.");
+      return;
   }
   if (!/\S+@\S+\.\S+/.test(email)) {
     setError("Please enter a valid email address.");
@@ -460,23 +495,17 @@ const handleNewRegistration = async (e: React.FormEvent) => {
     return;
   }
 
-  // Role is now taken directly from the form. Backend will handle admin creation logic.
-  const registrationData = {
+  const registrationData: any = {
     displayName: name,
     email,
     password,
-    role: role, // Role selected in the form
+    role: role,
     uniqueId,
     position: position || (role === 'admin' ? 'Administrator' : 'User Position'),
+    organizationName: role === 'admin' ? organizationName : undefined, // Sent to backend, may inform org creation
   };
 
-  // Endpoint choice might depend on whether it's an admin or user registration
-  // For simplicity, using one endpoint and letting backend decide based on role.
-  // Or, use /users/register for direct user/admin creation and /pending-users for users needing approval.
-  // Let's assume /users/register can handle both if backend is adjusted.
-  // If role is 'user', it might still go to /pending-users if that's the desired flow.
-  const endpoint = role === 'admin' ? '/users/register' : '/pending-users';
-
+  const endpoint = '/users/register'; // Central registration, backend handles admin/user/pending logic
 
   try {
     const response = await fetchData<{ success: boolean; user: BackendUser | BackendPendingUser; message?: string }>(endpoint, {
@@ -485,25 +514,25 @@ const handleNewRegistration = async (e: React.FormEvent) => {
     });
 
     if (response && response.success && response.user) {
-      if (endpoint === '/users/register') { // Directly created user (likely an admin or first user)
-        const createdUser = response.user as BackendUser;
-        setUsers(prev => [...prev, createdUser as User]); 
-        setSuccessMessage(`${createdUser.role === 'admin' ? 'Admin' : 'User'} account registered successfully! You can now log in.`);
-        emailService.sendWelcomeRegistrationEmail(createdUser.email, createdUser.displayName, createdUser.role);
-      } else { // Went to pending users
-        const createdPendingUser = response.user as BackendPendingUser;
-        setPendingUsers(prev => [...prev, createdPendingUser as PendingUser]);
-        setSuccessMessage("Registration submitted! Your account is pending administrator approval.");
-        emailService.sendRegistrationPendingToUserEmail(createdPendingUser.email, createdPendingUser.displayName);
-        const adminToNotify = getAdminToNotify();
-        if (adminToNotify) {
-          emailService.sendNewPendingRegistrationToAdminEmail(
-            adminToNotify.email, adminToNotify.displayName,
-            createdPendingUser.displayName, createdPendingUser.email
-          );
-        }
+      // Assuming successful registration always means direct user creation for now,
+      // or backend returns clear indication if it's pending.
+      // Based on current backend userRoutes, /register creates an active user.
+      const createdUser = response.user as BackendUser; // If it's BackendPendingUser, type assertion will be an issue
+      
+      // If a new admin registered, their data is not added to current `users` list yet, as it's a new org context.
+      // They need to log in to populate their new org's data.
+      if (createdUser.role === 'admin') {
+         setSuccessMessage(`Administrator account for organization '${organizationName}' registered successfully! You can now log in.`);
+      } else {
+         // This flow implies a user registered under an existing (but not current) admin,
+         // or a general registration that got associated with an org.
+         // This needs more thought for multi-tenant general registration.
+         // For now, assume this path is less common or handled by pre-reg.
+         setSuccessMessage(`User account for ${createdUser.displayName} registered. If admin approval is needed, you'll be notified.`);
       }
-      setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user', uniqueId: '', position: '' });
+
+      emailService.sendWelcomeRegistrationEmail(createdUser.email, createdUser.displayName, createdUser.role);
+      setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user', uniqueId: '', position: '', organizationName: '' });
       setAuthView('login');
     } else {
       setError(response?.message || "Registration failed. Please check details and try again.");
@@ -536,11 +565,28 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     setError(passwordValidationResult.errors.join(" "));
     return;
   }
+  
+  // Try to find referring admin to get their organizationId to pass to backend
+  // This helps backend scope the pending user correctly.
+  let organizationIdFromReferrer;
+  if (referringAdminId) {
+    // This assumes `users` list on client might have the referring admin if admin is browsing.
+    // More robustly, fetch admin details or rely on backend to correctly scope via referringAdminId.
+    // For now, this is a client-side attempt.
+    const refAdminInState = users.find(u => u.id === referringAdminId);
+    if (refAdminInState) {
+        organizationIdFromReferrer = refAdminInState.organizationId;
+    }
+    // If not found in current client state (e.g. user doing pre-reg directly from link),
+    // backend must use referringAdminId to find the organization.
+  }
+
 
   const newPendingUserData = {
     uniqueId, displayName, email, password,
     role: 'user' as Role, 
     referringAdminId: referringAdminId || undefined,
+    organizationIdFromReferrer: organizationIdFromReferrer // Pass to backend
   };
 
   try {
@@ -550,15 +596,17 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     });
 
     if (response && response.success && response.user) {
-      const createdPendingUser = response.user as BackendPendingUser;
-      setPendingUsers(prev => [...prev, createdPendingUser as PendingUser]);
+      // Pending user is created in the backend, associated with an organization.
+      // No need to add to client-side `pendingUsers` list here if admin is not logged in or in different org.
       setSuccessMessage("Pre-registration submitted successfully! Your account is pending administrator approval.");
       setPreRegistrationForm(prev => ({ ...initialPreRegistrationFormState, referringAdminId: prev.referringAdminId, referringAdminDisplayName: prev.referringAdminDisplayName, isReferralLinkValid: prev.isReferralLinkValid }));
 
-      const adminToNotify = getAdminToNotify(createdPendingUser.referringAdminId);
-      emailService.sendPreRegistrationSubmittedToUserEmail(createdPendingUser.email, createdPendingUser.displayName, adminToNotify?.displayName || 'the administrator');
-      if (adminToNotify) {
-        emailService.sendPreRegistrationNotificationToAdminEmail(adminToNotify.email, adminToNotify.displayName, createdPendingUser.displayName, createdPendingUser.uniqueId);
+      // Email notifications
+      emailService.sendPreRegistrationSubmittedToUserEmail(response.user.email, response.user.displayName, preRegistrationForm.referringAdminDisplayName);
+      // Admin notification needs to be smarter - find the correct admin for that organization.
+      // For now, if referringAdminId is present, we assume backend handles notifying that specific admin.
+      if (referringAdminId) {
+        // emailService.sendPreRegistrationNotificationToAdminEmail(...); // This would require fetching admin details
       }
     } else {
       setError(response?.message || "Failed to submit pre-registration.");
@@ -583,32 +631,32 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     }
 
     try {
-      const response = await fetchData<{ success: boolean; user: BackendUser; token: string; message?: string }>('/users/login', {
+      // Login response user object should include organizationId
+      const response = await fetchData<{ success: boolean; user: User; token: string; message?: string }>('/users/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       });
 
-      if (response && response.success && response.user && response.token) {
-        const loggedInUserWithToken: User = {
-          ...response.user,
-          id: response.user.id || response.user._id!, 
+      if (response && response.success && response.user && response.token && response.user.organizationId) {
+        const loggedInUserWithTokenAndOrg: User = {
+          ...response.user, // this now includes organizationId from backend
           token: response.token
         };
-        setCurrentUser(loggedInUserWithToken);
+        // setCurrentUser(loggedInUserWithTokenAndOrg); // This will be set by loadInitialData
 
-        setSuccessMessage(`Welcome back, ${loggedInUserWithToken.displayName}!`);
+        setSuccessMessage(`Welcome back, ${loggedInUserWithTokenAndOrg.displayName}!`);
         setNewLoginForm({ email: '', password: '' });
 
-        await loadInitialData(loggedInUserWithToken);
+        await loadInitialData(loggedInUserWithTokenAndOrg); // Pass token data
 
-        const targetPage = loggedInUserWithToken.role === 'admin' ? Page.Dashboard : Page.ViewAssignments;
+        const targetPage = loggedInUserWithTokenAndOrg.role === 'admin' ? Page.Dashboard : Page.ViewAssignments;
         navigateTo(targetPage);
 
-        if (loggedInUserWithToken.role === 'user' && !localStorage.getItem(`hasCompletedUserTour_${loggedInUserWithToken.id}`)) {
+        if (loggedInUserWithTokenAndOrg.role === 'user' && !localStorage.getItem(`hasCompletedUserTour_${loggedInUserWithTokenAndOrg.id}`)) {
           setShowUserTour(true);
         }
       } else {
-        setError(response?.message || "Invalid email or password, or login failed on server.");
+        setError(response?.message || "Invalid email or password, or login failed on server (org ID might be missing).");
       }
     } catch (err: any) {
       setError(err.message || "Login failed. Please check your credentials or server status.");
@@ -617,22 +665,31 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
   const handleLogout = async () => {
     clearMessages();
-    try {
-      await fetchData('/users/logout', { method: 'POST' });
-    } catch (err: any) {
-      console.warn("Logout API call failed (user will be logged out client-side anyway):", err.message);
+    const token = localStorage.getItem(JWT_TOKEN_KEY);
+    if (token) {
+        try {
+          await fetchData('/users/logout', { method: 'POST' }); // Backend might do session cleanup if any
+        } catch (err: any) {
+          console.warn("Logout API call failed (user will be logged out client-side anyway):", err.message);
+        }
     }
-    setCurrentUser(null);
+    setCurrentUser(null); // This also removes JWT_TOKEN_KEY
     setUsers([]);
     setPendingUsers([]);
     setTasks([]);
     setPrograms([]);
     setAssignments([]);
     setAdminLogs([]);
+    _setCurrentPageInternal(Page.Login); // Directly set internal state first
+    navigateTo(Page.Login); // Then update hash
     setSuccessMessage("You have been logged out successfully.");
-    _setCurrentPageInternal(Page.Login);
-    navigateTo(Page.Login);
   };
+// ... (rest of App.tsx remains largely the same, but all data display will be implicitly scoped by backend)
+// Key changes for User Management within App.tsx:
+// - When creating user by admin: new user inherits admin's organizationId.
+// - When approving pending user: user joins admin's organization.
+// - Deleting users: scoped by admin's organization.
+// - Generating pre-reg link: link should ideally carry org context for backend.
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -648,6 +705,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
     const updatePayload: Partial<User> & { password?: string } = {
       uniqueId, displayName, position, userInterests, phone, notificationPreference,
+      // email and role are not updated here. organizationId is immutable for a user.
     };
 
     if (password) {
@@ -662,6 +720,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     }
 
     try {
+      // Backend will ensure this update is for the correct user and within their org.
       const response = await fetchData<{ success: boolean; user: BackendUser; message?: string }>(`/users/${currentUser.id}`, {
         method: 'PUT',
         body: JSON.stringify(updatePayload),
@@ -671,13 +730,18 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         const updatedUserFromServer: User = {
             ...response.user,
             id: response.user.id || response.user._id!,
+            organizationId: currentUser.organizationId, // Ensure orgId from current session is retained
             token: localStorage.getItem(JWT_TOKEN_KEY) || undefined
         };
+        // Update user in local state
         setUsers(users.map(u => u.id === currentUser.id ? updatedUserFromServer : u));
-        setCurrentUserInternal(updatedUserFromServer);
+        setCurrentUserInternal(updatedUserFromServer); // Update current user state
         setSuccessMessage("Profile updated successfully!");
         setUserForm(prev => ({ ...prev, password: '', confirmPassword: '' }));
-        await addAdminLogEntry(`User profile updated for ${updatedUserFromServer.displayName} (ID: ${updatedUserFromServer.uniqueId}).`);
+        // Admin log should also be scoped by organizationId on backend
+        if (currentUser.role === 'admin') {
+            await addAdminLogEntry(`User profile updated for ${updatedUserFromServer.displayName} (ID: ${updatedUserFromServer.uniqueId}).`);
+        }
       } else {
         setError(response?.message || "Failed to update profile.");
       }
@@ -689,7 +753,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
   const handleAdminUpdateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     clearMessages();
-    if (!editingUserId || !currentUser || currentUser.role !== 'admin') return;
+    if (!editingUserId || !currentUser || currentUser.role !== 'admin' || !currentUser.organizationId) return;
 
     const { email, uniqueId, displayName, position, userInterests, phone, notificationPreference, password, confirmPassword, role } = userForm;
 
@@ -701,7 +765,8 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     }
 
     const updatePayload: Partial<User> & { password?: string } = {
-      email, uniqueId, displayName, position, userInterests, phone, notificationPreference, role
+      email, uniqueId, displayName, position, userInterests, phone, notificationPreference, role,
+      organizationId: currentUser.organizationId // Ensure update is within admin's org
     };
 
     if (password) {
@@ -712,13 +777,14 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     }
 
     try {
+      // Backend will ensure admin can only update users in their own organization.
       const response = await fetchData<{ success: boolean; user: BackendUser; message?: string }>(`/users/${editingUserId}`, {
         method: 'PUT',
         body: JSON.stringify(updatePayload),
       });
 
       if (response && response.success && response.user) {
-        const baseUpdatedUser: User = { ...response.user, id: response.user.id || response.user._id!};
+        const baseUpdatedUser: User = { ...response.user, id: response.user.id || response.user._id!, organizationId: currentUser.organizationId };
         setUsers(users.map(u => u.id === editingUserId ? baseUpdatedUser : u));
         setSuccessMessage(`User ${baseUpdatedUser.displayName} updated successfully!`);
         setEditingUserId(null); setUserForm(initialUserFormData);
@@ -737,8 +803,8 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     clearMessages();
 
-    if (!currentUser || !currentUser.id || currentUser.role !== 'admin') {
-        setError("Action not allowed or current user data is missing.");
+    if (!currentUser || !currentUser.id || currentUser.role !== 'admin' || !currentUser.organizationId) {
+        setError("Action not allowed or current user data is missing organization context.");
         return;
     }
 
@@ -754,20 +820,20 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
     const newUserData = {
       email, uniqueId, password, 
-      role: role, // Use role from form
+      role: role, 
       displayName, position, userInterests, phone, notificationPreference,
-      referringAdminId: currentUser.id // Admin creating the user
+      referringAdminId: currentUser.id, // Admin creating the user
+      organizationId: currentUser.organizationId // New user belongs to this admin's organization
     };
 
     try {
-      // Use /users/register, backend should allow admin to create other admins or users
       const response = await fetchData<{ success: boolean; user: BackendUser; message?: string }>('/users/register', { 
         method: 'POST',
-        body: JSON.stringify(newUserData),
+        body: JSON.stringify(newUserData), // Backend will use organizationId from payload
       });
 
       if (response && response.success && response.user) {
-        const createdUser: User = {...response.user, id: response.user.id || response.user._id!};
+        const createdUser: User = {...response.user, id: response.user.id || response.user._id!, organizationId: currentUser.organizationId};
         setUsers(prev => [...prev, createdUser]);
         setSuccessMessage(`User ${createdUser.displayName} (Role: ${createdUser.role}) created successfully!`);
         setUserForm(initialUserFormData);
@@ -783,31 +849,35 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
   };
 
   const handleApprovePendingUser = async () => {
-    if (!approvingPendingUser || !currentUser || currentUser.role !== 'admin') {
-      setError("Approval failed: Invalid operation or permissions."); return;
+    if (!approvingPendingUser || !currentUser || currentUser.role !== 'admin' || !currentUser.organizationId) {
+      setError("Approval failed: Invalid operation, permissions, or missing organization context."); return;
+    }
+    // Ensure admin is approving a user for their own organization
+    if (approvingPendingUser.organizationId && approvingPendingUser.organizationId !== currentUser.organizationId) {
+        setError("Cannot approve user from a different organization."); return;
     }
     clearMessages();
 
-    // Role for approved user; backend should respect this if valid (e.g., can't make everyone admin if policy exists)
-    // For now, let's assume the pending user's intended role is what we try to approve, or 'user' by default.
-    const roleToApprove = approvingPendingUser.role || 'user';
+    const roleToApprove = userForm.role || approvingPendingUser.role || 'user';
 
     const approvalData = {
         position: userForm.position || 'Default Position',
         userInterests: userForm.userInterests || '',
         phone: userForm.phone || '',
         notificationPreference: userForm.notificationPreference || 'email',
-        role: roleToApprove, 
+        role: roleToApprove,
+        // organizationId will be handled by backend based on pending user record or admin's context
     };
     
     try {
+      // Backend /pending-users/approve/:id should ensure approved user is created in admin's organization.
       const response = await fetchData<{ success: boolean; user: BackendUser; message?: string }>(`/pending-users/approve/${approvingPendingUser.id}`, {
         method: 'POST',
         body: JSON.stringify(approvalData),
       });
 
       if (response && response.success && response.user) {
-        const createdUser: User = {...response.user, id: response.user.id || response.user._id!};
+        const createdUser: User = {...response.user, id: response.user.id || response.user._id!, organizationId: currentUser.organizationId};
         setUsers(prev => [...prev, createdUser]);
         setPendingUsers(prev => prev.filter(pu => pu.id !== approvingPendingUser.id));
 
@@ -825,10 +895,11 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
   };
 
   const handleRejectPendingUser = async (pendingUserId: string) => {
-    if (!currentUser || currentUser.role !== 'admin') return;
+    if (!currentUser || currentUser.role !== 'admin' || !currentUser.organizationId) return;
     clearMessages();
     try {
       const userToReject = pendingUsers.find(pu => pu.id === pendingUserId);
+       // Backend will ensure admin can only reject users from their own organization.
       const response = await fetchData<{success: boolean, message?:string}>(`/pending-users/${pendingUserId}`, { method: 'DELETE' });
 
       if(response && response.success){
@@ -844,22 +915,18 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
   };
 
   const handleDeleteUser = async (userId: string) => {
-    if (!currentUser || currentUser.role !== 'admin') return;
+    if (!currentUser || currentUser.role !== 'admin' || !currentUser.organizationId) return;
     if (currentUser.id === userId) { setError("Admins cannot delete their own accounts."); return; }
     
     const userToDelete = users.find(u => u.id === userId);
-    // Modified: Allow admin to delete other admins if needed, but with caution.
-    // The sole admin check should be on backend.
-    // if (userToDelete && userToDelete.role === 'admin') {
-    //     setError("Cannot delete an administrator account using this function.");
-    //     return;
-    // }
-
+    // Backend will ensure admin can only delete users from their own organization.
     clearMessages();
     try {
       const response = await fetchData<{success: boolean, message?:string}>(`/users/${userId}`, { method: 'DELETE' });
       if(response && response.success) {
         setUsers(prev => prev.filter(u => u.id !== userId));
+        // Refresh assignments if a user is deleted, as they might have had tasks.
+        // Backend should scope this to the organization.
         const updatedAssignments = await fetchData<Assignment[]>('/assignments', {}, []);
         setAssignments(updatedAssignments || []);
         setSuccessMessage(`User ${userToDelete?.displayName || 'user'} deleted.`);
@@ -873,9 +940,11 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
   };
 
   const handleGeneratePreRegistrationLink = () => {
-    if (!currentUser || currentUser.role !== 'admin') {
+    if (!currentUser || currentUser.role !== 'admin' || !currentUser.organizationId) {
       setError("Only admins can generate pre-registration links."); return;
     }
+    // Link should ideally include organization context if backend needs it explicitly,
+    // otherwise backend uses refAdminId to determine organization.
     const link = `${window.location.origin}${window.location.pathname}#${Page.PreRegistration}?refAdminId=${currentUser.id}`;
     setGeneratedLink(link);
     setSuccessMessage("Pre-registration link generated. Share it with the intended user.");
@@ -893,8 +962,10 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
   const handleCreateProgram = async (e: React.FormEvent) => {
     e.preventDefault(); clearMessages();
+    if (!currentUser || !currentUser.organizationId) { setError("Organization context missing."); return; }
     if (!programForm.name.trim() || !programForm.description.trim()) { setError("Program name and description are required."); return; }
-    const newProgramData: Omit<Program, 'id'> = { ...programForm };
+    // Backend will associate program with currentUser.organizationId.
+    const newProgramData: Omit<Program, 'id' | 'organizationId'> = { ...programForm };
     try {
       const createdProgram = await fetchData<Program>('/programs', { method: 'POST', body: JSON.stringify(newProgramData) });
       if (createdProgram && createdProgram.id) {
@@ -908,6 +979,8 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
   const handleDeleteProgram = async (programId: string) => {
     clearMessages();
+    if (!currentUser || !currentUser.organizationId) { setError("Organization context missing."); return; }
+    // Backend will ensure deletion is scoped to organization.
     try {
       const programToDelete = programs.find(p => p.id === programId);
       await fetchData(`/programs/${programId}`, { method: 'DELETE' });
@@ -921,10 +994,12 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault(); clearMessages();
+    if (!currentUser || !currentUser.organizationId) { setError("Organization context missing."); return; }
     if (!taskForm.title.trim() || !taskForm.description.trim() || !taskForm.requiredSkills.trim()) { setError("Task title, description, and required skills are required."); return; }
-    const associatedProgram = programs.find(p => p.id === taskForm.programId);
-    const newTaskData: Partial<Task> = { ...taskForm, deadline: taskForm.deadline ? new Date(taskForm.deadline).toISOString().split('T')[0] : undefined, programName: associatedProgram?.name };
+    const associatedProgram = programs.find(p => p.id === taskForm.programId); // programs is already org-scoped
+    const newTaskData: Partial<Omit<Task, 'id' | 'organizationId'>> = { ...taskForm, deadline: taskForm.deadline ? new Date(taskForm.deadline).toISOString().split('T')[0] : undefined, programName: associatedProgram?.name };
     try {
+      // Backend associates task with currentUser.organizationId.
       const createdTask = await fetchData<Task>('/tasks', { method: 'POST', body: JSON.stringify(newTaskData) });
       if (createdTask && createdTask.id) {
         setTasks(prev => [...prev, createdTask]);
@@ -937,6 +1012,8 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
   const handleDeleteTask = async (taskId: string) => {
     clearMessages();
+     if (!currentUser || !currentUser.organizationId) { setError("Organization context missing."); return; }
+    // Backend ensures deletion is scoped to organization.
     try {
       const taskToDelete = tasks.find(t => t.id === taskId);
       await fetchData(`/tasks/${taskId}`, { method: 'DELETE' });
@@ -949,8 +1026,9 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
   const handleGetAssignmentSuggestion = async () => {
     if (!selectedTaskForAssignment) { setError("Please select a task first."); return; }
-    const task = tasks.find(t => t.id === selectedTaskForAssignment);
+    const task = tasks.find(t => t.id === selectedTaskForAssignment); // tasks is org-scoped
     if (!task) { setError("Selected task not found."); return; }
+    // users and assignments are already org-scoped.
     const usersEligible = users.filter(u => u.role === 'user' && !assignments.some(a => a.taskId === task.id && a.personId === u.id && (a.status === 'pending_acceptance' || a.status === 'accepted_by_user')));
     setIsLoadingSuggestion(true); setError(null); setAssignmentSuggestion(null);
     try {
@@ -966,15 +1044,17 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
   const handleAssignTask = async (e: React.FormEvent, suggestedPersonDisplayName?: string | null) => {
     e.preventDefault(); clearMessages();
+    if (!currentUser || !currentUser.organizationId) { setError("Organization context missing."); return; }
     const personIdToAssign = (e.target as HTMLFormElement).assignPerson.value;
     const specificDeadline = (e.target as HTMLFormElement).specificDeadline?.value;
     if (!selectedTaskForAssignment || !personIdToAssign) { setError("Task and person must be selected."); return; }
-    const task = tasks.find(t => t.id === selectedTaskForAssignment);
-    const person = users.find(u => u.id === personIdToAssign);
-    if (!task || !person) { setError("Selected task or person not found."); return; }
+    const task = tasks.find(t => t.id === selectedTaskForAssignment); // org-scoped
+    const person = users.find(u => u.id === personIdToAssign); // org-scoped
+    if (!task || !person) { setError("Selected task or person not found in your organization."); return; }
     if (assignments.some(a => a.taskId === task.id && a.personId === person.id && (a.status === 'pending_acceptance' || a.status === 'accepted_by_user'))) { setError(`${person.displayName} is already assigned this task or pending acceptance.`); return; }
     const justification = suggestedPersonDisplayName === person.displayName && assignmentSuggestion?.justification ? assignmentSuggestion.justification : 'Manually assigned by admin.';
-    const newAssignmentData: Partial<Assignment> = { taskId: task.id, personId: person.id, taskTitle: task.title, personName: person.displayName, justification, status: 'pending_acceptance', deadline: specificDeadline || task.deadline, };
+    // Backend will set organizationId on assignment.
+    const newAssignmentData: Partial<Omit<Assignment, 'organizationId'>> = { taskId: task.id, personId: person.id, taskTitle: task.title, personName: person.displayName, justification, status: 'pending_acceptance', deadline: specificDeadline || task.deadline, };
     try {
       const createdAssignment = await fetchData<Assignment>('/assignments', { method: 'POST', body: JSON.stringify(newAssignmentData) });
       if (createdAssignment && createdAssignment.taskId) {
@@ -988,8 +1068,10 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
   };
 
   const updateAssignmentStatus = async (taskId: string, personId: string, newStatus: AssignmentStatus, additionalData: Record<string, any> = {}) => {
-    if (!currentUser && newStatus !== 'pending_acceptance') return null;
+    if (!currentUser && newStatus !== 'pending_acceptance') return null; // Should have currentUser if logged in
+    if (!currentUser || !currentUser.organizationId) { setError("Organization context missing."); return null;}
     clearMessages();
+    // Backend will ensure this is scoped to organization.
     const payload = { taskId, personId, status: newStatus, ...additionalData };
     try {
       const updatedAssignment = await fetchData<Assignment>(`/assignments`, { method: 'PATCH', body: JSON.stringify(payload) });
@@ -1007,7 +1089,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         const updatedAssignment = await updateAssignmentStatus(taskId, currentUser.id, 'accepted_by_user');
         if (updatedAssignment) {
             setSuccessMessage(`Task "${updatedAssignment.taskTitle}" accepted.`);
-            const admin = getAdminToNotify(users.find(u=>u.id === currentUser.referringAdminId)?.id);
+            const admin = getAdminToNotify(users.find(u=>u.id === currentUser.referringAdminId)?.id); // users is org-scoped
             if (admin?.notificationPreference === 'email' && admin.email) { emailService.sendTaskStatusUpdateToAdminEmail(admin.email, admin.displayName, currentUser.displayName, updatedAssignment.taskTitle, "accepted"); }
         }
     } catch (e) { /* error set by updateAssignmentStatus */ }
@@ -1051,9 +1133,10 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
   const handleAdminApproveTaskCompletion = async (taskId: string, personId: string) => {
     if (!currentUser || currentUser.role !== 'admin') return;
      try {
+        // Backend will scope this.
         const updated = await updateAssignmentStatus(taskId, personId, 'completed_admin_approved');
         if (updated) {
-            const user = users.find(u => u.id === personId);
+            const user = users.find(u => u.id === personId); // users is org-scoped
             setSuccessMessage(`Completion of task "${updated.taskTitle}" by ${user?.displayName || 'user'} approved.`);
             if (user?.notificationPreference === 'email' && user.email) { emailService.sendTaskCompletionApprovedToUserEmail(user.email, user.displayName, updated.taskTitle, currentUser.displayName); }
             await addAdminLogEntry(`Admin approved task completion for "${updated.taskTitle}" by ${user?.displayName}.`);
@@ -1062,8 +1145,9 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
   };
 
   const addAdminLogEntry = async (logText: string, imagePreviewUrl?: string) => {
-    if (!currentUser || currentUser.role !== 'admin') return;
-    const newLogData: Omit<AdminLogEntry, 'id'> = { adminId: currentUser.id, adminDisplayName: currentUser.displayName, timestamp: new Date().toISOString(), logText, imagePreviewUrl };
+    if (!currentUser || currentUser.role !== 'admin' || !currentUser.organizationId) return;
+    // Backend will set organizationId.
+    const newLogData: Omit<AdminLogEntry, 'id' | 'organizationId'> = { adminId: currentUser.id, adminDisplayName: currentUser.displayName, timestamp: new Date().toISOString(), logText, imagePreviewUrl };
     try {
         const createdLog = await fetchData<AdminLogEntry>('/admin-logs', { method: 'POST', body: JSON.stringify(newLogData) });
         if (createdLog?.id) setAdminLogs(prev => [createdLog, ...prev]);
@@ -1101,6 +1185,8 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     const emailToReset = newLoginForm.email;
     if (!emailToReset || !/\S+@\S+\.\S+/.test(emailToReset)) { setError("Please enter a valid email address."); return; }
     try {
+        // Backend /forgot-password might need org context if emails are not globally unique.
+        // For now, assuming email is the primary lookup for password reset.
         await fetchData('/users/forgot-password', { method: 'POST', body: JSON.stringify({ email: emailToReset }) });
         setInfoMessage(`If an account exists for ${emailToReset}, a password reset link has been sent.`);
     } catch (err: any) {
@@ -1137,7 +1223,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     </>
   );
 
-  if (isLoadingAppData && !currentUser) {
+  if (isLoadingAppData && !currentUser) { // Still loading or token validation failed but before redirect
      return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-bground p-4">
         <LoadingSpinner />
@@ -1163,8 +1249,8 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       );
     }
 
-    const anyAdminExists = getAdminExists(); // Used for UI hints about first admin setup
-
+    // "anyAdminExists" is no longer globally relevant.
+    // The registration form logic will handle admin vs user role selection.
 
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-authPageBg p-4 main-app-scope">
@@ -1199,18 +1285,22 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
               <div> <label htmlFor="regUniqueId" className="block text-sm font-medium text-textlight">System ID / Username</label> <AuthFormInput type="text" id="regUniqueId" aria-label="System ID for registration" placeholder="Create a unique ID" value={newRegistrationForm.uniqueId} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, uniqueId: e.target.value })} required /> </div>
               <div> <label htmlFor="regPassword" className="block text-sm font-medium text-textlight">Password</label> <AuthFormInput type="password" id="regPassword" aria-label="Password for registration" placeholder="Create a password" value={newRegistrationForm.password} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, password: e.target.value })} required autoComplete="new-password" aria-describedby="passwordHelpReg"/> <p id="passwordHelpReg" className="mt-1 text-xs text-neutral">{passwordRequirementsText}</p> </div>
               <div> <label htmlFor="regConfirmPassword" className="block text-sm font-medium text-textlight">Confirm Password</label> <AuthFormInput type="password" id="regConfirmPassword" aria-label="Confirm password for registration" placeholder="Confirm your password" value={newRegistrationForm.confirmPassword} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, confirmPassword: e.target.value })} required autoComplete="new-password" /> </div>
-
+              
               <div>
                 <label htmlFor="regRole" className="block text-sm font-medium text-textlight">Register as</label>
                 <AuthFormSelect id="regRole" aria-label="Select role for registration" value={newRegistrationForm.role} onChange={(e) => setNewRegistrationForm({...newRegistrationForm, role: e.target.value as Role})}>
-                  <option value="user">User (requires admin approval)</option>
-                  <option value="admin">Administrator</option>
+                  <option value="user">User (requires referral/invitation)</option>
+                  <option value="admin">Administrator (creates a new site)</option>
                 </AuthFormSelect>
-                 <small className="text-xs text-gray-500">
-                    {!anyAdminExists && newRegistrationForm.role === 'admin' ? "First administrator account setup." : 
-                     (newRegistrationForm.role === 'admin' ? "Registering as an additional Administrator." : "User accounts require administrator approval.")}
-                  </small>
               </div>
+              {newRegistrationForm.role === 'admin' && (
+                <div> <label htmlFor="regOrgName" className="block text-sm font-medium text-textlight">Organization/Site Name</label> <AuthFormInput type="text" id="regOrgName" aria-label="Organization or Site Name" placeholder="Your Organization Name" value={newRegistrationForm.organizationName} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, organizationName: e.target.value })} required /> <small className="text-xs text-gray-500">This will be the name of your new, separate site.</small> </div>
+              )}
+               <small className="text-xs text-gray-500">
+                  {newRegistrationForm.role === 'admin' ? "Registering as an Administrator creates a new, isolated site." : 
+                   "User accounts are typically created via pre-registration links from an existing site administrator."}
+                </small>
+
 
               <button type="submit" className="w-full py-3 px-4 bg-authButton hover:bg-authButtonHover text-textlight font-semibold rounded-md shadow-sm transition-colors text-sm" disabled={isLoadingAppData}>
                 {isLoadingAppData ? <LoadingSpinner/> : 'Register'}
@@ -1223,14 +1313,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
               {authView === 'login' ? 'Register here' : 'Sign in here'}
             </button>
           </p>
-           { !isLoadingAppData && !anyAdminExists && authView === 'login' && (
-            <div className="mt-6 p-4 bg-yellow-50 border border-yellow-300 rounded-md">
-              <p className="text-sm text-yellow-700">
-                <strong className="font-bold">First-time Setup:</strong> No admin accounts detected. The first user to register will become an administrator.
-                Please <button type="button" onClick={() => { clearMessages(); setNewRegistrationForm(prev => ({...prev, role: 'admin'})); setAuthView('register'); }} className="font-medium text-authLink hover:underline">register as Admin</button>.
-              </p>
-            </div>
-          )}
+          {/* Removed the global "First-time Setup" hint as admin registration now creates a new org. */}
         </div>
         <footer className="text-center py-6 text-sm text-neutral mt-auto">
           <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by SHAIK MOAHAMMED NAWAZ.</p>
@@ -1258,14 +1341,16 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         {currentPage === Page.Dashboard && currentUser.role === 'admin' && (
           <div className="space-y-6">
             <h2 className="text-3xl font-semibold text-primary mb-6">Admin Dashboard</h2>
+             <p className="text-md text-neutral">Organization ID: {currentUser.organizationId}</p>
+
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Users</h3> <p className="text-3xl font-bold text-textlight">{users.length}</p> <p className="text-sm text-neutral">Total active users</p> </div>
-                <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Pending Approvals</h3> <p className="text-3xl font-bold text-textlight">{pendingUsers.length}</p> <p className="text-sm text-neutral">Users awaiting approval</p> </div>
-                <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Tasks</h3> <p className="text-3xl font-bold text-textlight">{tasks.length}</p> <p className="text-sm text-neutral">Total defined tasks</p> </div>
-                <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Programs</h3> <p className="text-3xl font-bold text-textlight">{programs.length}</p> <p className="text-sm text-neutral">Total programs</p> </div>
-                 <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Active Assignments</h3> <p className="text-3xl font-bold text-textlight">{assignments.filter(a => a.status === 'accepted_by_user' || a.status === 'pending_acceptance').length}</p> <p className="text-sm text-neutral">Tasks currently assigned</p> </div>
-                 <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Completed Tasks</h3> <p className="text-3xl font-bold text-textlight">{assignments.filter(a => a.status === 'completed_admin_approved').length}</p> <p className="text-sm text-neutral">Successfully finished tasks</p> </div>
+                <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Users</h3> <p className="text-3xl font-bold text-textlight">{users.length}</p> <p className="text-sm text-neutral">Total active users in your organization</p> </div>
+                <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Pending Approvals</h3> <p className="text-3xl font-bold text-textlight">{pendingUsers.length}</p> <p className="text-sm text-neutral">Users awaiting approval in your organization</p> </div>
+                <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Tasks</h3> <p className="text-3xl font-bold text-textlight">{tasks.length}</p> <p className="text-sm text-neutral">Total defined tasks in your organization</p> </div>
+                <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Programs</h3> <p className="text-3xl font-bold text-textlight">{programs.length}</p> <p className="text-sm text-neutral">Total programs in your organization</p> </div>
+                 <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Active Assignments</h3> <p className="text-3xl font-bold text-textlight">{assignments.filter(a => a.status === 'accepted_by_user' || a.status === 'pending_acceptance').length}</p> <p className="text-sm text-neutral">Tasks currently assigned in your organization</p> </div>
+                 <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Completed Tasks</h3> <p className="text-3xl font-bold text-textlight">{assignments.filter(a => a.status === 'completed_admin_approved').length}</p> <p className="text-sm text-neutral">Successfully finished tasks in your organization</p> </div>
             </div>
 
             <div className="bg-surface p-6 rounded-lg shadow-md">
@@ -1278,8 +1363,8 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
             </div>
 
             <div className="bg-surface p-6 rounded-lg shadow-md">
-                <h3 className="text-xl font-semibold text-primary mb-4">Recent Admin Logs</h3>
-                {adminLogs.length === 0 ? <p className="text-neutral">No admin logs.</p> : (
+                <h3 className="text-xl font-semibold text-primary mb-4">Recent Admin Logs (Your Organization)</h3>
+                {adminLogs.length === 0 ? <p className="text-neutral">No admin logs for your organization.</p> : (
                     <ul className="space-y-3 max-h-96 overflow-y-auto">
                     {adminLogs.slice(0, 10).map(log => ( <li key={log.id} className="p-3 bg-bground rounded-md shadow-sm"> <p className="text-sm text-textlight"><strong className="font-medium">{log.adminDisplayName}</strong>: {log.logText}</p> <p className="text-xs text-neutral mt-1">{new Date(log.timestamp).toLocaleString()}</p> {log.imagePreviewUrl && <div className="mt-2"><img src={log.imagePreviewUrl} alt="Log attachment" className="max-h-40 max-w-xs rounded border border-neutral"/></div>} </li> ))}
                     </ul>
@@ -1293,6 +1378,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
             <h2 className="text-2xl font-semibold text-primary mb-6">My Profile</h2>
             <form onSubmit={handleUpdateProfile} className="space-y-4">
               <FormInput label="Email (Cannot be changed)" id="profileEmail" type="email" value={userForm.email} readOnly disabled description="Login email cannot be changed." />
+               <FormInput label="Organization ID (Cannot be changed)" id="profileOrgId" type="text" value={userForm.organizationId} readOnly disabled description="Your site/organization identifier." />
               <FormInput label="System ID / Username" id="profileUniqueId" type="text" value={userForm.uniqueId} onChange={e => setUserForm({...userForm, uniqueId: e.target.value})} required description="Your unique system identifier." />
               <FormInput label="Display Name" id="profileDisplayName" type="text" value={userForm.displayName} onChange={e => setUserForm({...userForm, displayName: e.target.value})} required />
               <FormInput label="Position / Role Title" id="profilePosition" type="text" value={userForm.position} onChange={e => setUserForm({...userForm, position: e.target.value})} required />
@@ -1311,12 +1397,12 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
         {currentPage === Page.UserManagement && currentUser.role === 'admin' && (
           <div className="space-y-6">
-            <h2 className="text-2xl font-semibold text-primary mb-1">User Management</h2>
-            <p className="text-sm text-neutral mb-6">Manage accounts, approve registrations, view details.</p>
+            <h2 className="text-2xl font-semibold text-primary mb-1">User Management (Organization: {currentUser.organizationId})</h2>
+            <p className="text-sm text-neutral mb-6">Manage accounts, approve registrations, view details for your organization.</p>
 
             {editingUserId || approvingPendingUser || new URLSearchParams(window.location.hash.split('?')[1]).get('action') === 'createUser' ? (
               <div className="bg-surface p-6 rounded-lg shadow-md">
-                <h3 className="text-xl font-semibold text-accent mb-4"> {editingUserId ? `Edit User: ${users.find(u=>u.id===editingUserId)?.displayName || ''}` : (approvingPendingUser ? `Approve: ${approvingPendingUser.displayName}` : 'Create New User')} </h3>
+                <h3 className="text-xl font-semibold text-accent mb-4"> {editingUserId ? `Edit User: ${users.find(u=>u.id===editingUserId)?.displayName || ''}` : (approvingPendingUser ? `Approve: ${approvingPendingUser.displayName}` : 'Create New User (for your organization)')} </h3>
                 <form onSubmit={editingUserId ? handleAdminUpdateUser : (approvingPendingUser ? handleApprovePendingUser : handleCreateUserByAdmin)} className="space-y-4">
                   <FormInput label="Email" id="userMgmtEmail" type="email" value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} required />
                   <FormInput label="System ID / Username" id="userMgmtUniqueId" type="text" value={userForm.uniqueId} onChange={e => setUserForm({...userForm, uniqueId: e.target.value})} required />
@@ -1326,11 +1412,14 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                   <FormInput label="Phone (Optional)" id="userMgmtPhone" type="tel" value={userForm.phone} onChange={e => setUserForm({...userForm, phone: e.target.value})} />
                   <FormSelect label="Notification Preference" id="userMgmtNotificationPreference" value={userForm.notificationPreference} onChange={e => setUserForm({...userForm, notificationPreference: e.target.value as NotificationPreference})}> <option value="email">Email</option> <option value="phone" disabled>Phone (Not Implemented)</option> <option value="none">None</option> </FormSelect>
                   
-                  <FormSelect label="Role" id="userMgmtRole" value={userForm.role} onChange={e => setUserForm({...userForm, role: e.target.value as Role})} disabled={!!approvingPendingUser}>
+                  <FormSelect label="Role" id="userMgmtRole" value={userForm.role} 
+                    onChange={e => setUserForm({...userForm, role: e.target.value as Role})} 
+                    disabled={!!approvingPendingUser || (editingUserId && users.find(u=>u.id===editingUserId)?.role === 'admin' && users.filter(u=>u.role==='admin').length <=1 )}>
                      <option value="user">User</option>
-                     <option value="admin">Administrator</option>
+                     <option value="admin">Administrator (for this organization)</option>
                   </FormSelect>
                    {approvingPendingUser && <p className="text-xs text-neutral">Role for pending user is typically 'user' upon approval. Backend may enforce policies.</p>}
+                   {(editingUserId && users.find(u=>u.id===editingUserId)?.role === 'admin' && users.filter(u=>u.role==='admin').length <=1 ) && <p className="text-xs text-neutral">Cannot demote the sole administrator of the organization.</p>}
 
 
                   {!approvingPendingUser && (
@@ -1343,23 +1432,24 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                   <div className="flex space-x-3"> <button type="submit" className="btn-success"> {editingUserId ? 'Save Changes' : (approvingPendingUser ? 'Approve & Create' : 'Create User')} </button> <button type="button" className="btn-neutral" onClick={() => { setEditingUserId(null); setApprovingPendingUser(null); setUserForm(initialUserFormData); clearMessages(); navigateTo(Page.UserManagement); }}>Cancel</button> </div>
                 </form>
               </div>
-            ) : ( <button onClick={() => { setUserForm({...initialUserFormData, role: 'user'}); clearMessages(); navigateTo(Page.UserManagement, {action: 'createUser'}); }} className="btn-primary mb-4 flex items-center"><PlusCircleIcon className="w-5 h-5 mr-2"/>Add New User</button> )}
+            ) : ( <button onClick={() => { setUserForm({...initialUserFormData, role: 'user', organizationId: currentUser.organizationId}); clearMessages(); navigateTo(Page.UserManagement, {action: 'createUser'}); }} className="btn-primary mb-4 flex items-center"><PlusCircleIcon className="w-5 h-5 mr-2"/>Add New User</button> )}
 
              <div className="bg-surface p-6 rounded-lg shadow-md">
-              <h3 className="text-xl font-semibold text-accent mb-3">Pre-registration Link</h3>
+              <h3 className="text-xl font-semibold text-accent mb-3">Pre-registration Link (for your organization)</h3>
               <button onClick={handleGeneratePreRegistrationLink} className="btn-secondary flex items-center"><KeyIcon className="w-5 h-5 mr-2"/>Generate Link</button>
               {generatedLink && ( <div className="mt-3 p-3 bg-bground rounded"> <p className="text-sm text-textlight break-all">{generatedLink}</p> <button onClick={() => copyToClipboard(generatedLink)} className="text-xs btn-neutral mt-2">Copy</button> </div> )}
             </div>
 
             <div className="bg-surface p-6 rounded-lg shadow-md">
               <h3 className="text-xl font-semibold text-accent mb-4">Pending Approvals ({pendingUsers.length})</h3>
-              {pendingUsers.length === 0 ? <p className="text-neutral">No users awaiting approval.</p> : (
+              {pendingUsers.length === 0 ? <p className="text-neutral">No users awaiting approval for your organization.</p> : (
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-bground"> <tr> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Name</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Email / System ID</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Intended Role / Date</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Actions</th> </tr> </thead>
                     <tbody className="bg-surface divide-y divide-gray-200">
                       {pendingUsers.map(pu => {
-                        const canApprove = !pu.referringAdminId || (pu.referringAdminId && currentUser && currentUser.id === pu.referringAdminId) || currentUser.role === 'admin'; // General admin can approve if no specific referrer or is the referrer
+                        // Admin can approve any user in their organization's pending list.
+                        const canApprove = currentUser && currentUser.role === 'admin' && pu.organizationId === currentUser.organizationId;
                         return (
                           <tr key={pu.id}>
                             <td className="px-4 py-3 text-sm text-textlight">{pu.displayName}</td>
@@ -1367,14 +1457,14 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                             <td className="px-4 py-3 text-sm text-textlight">{pu.role} <br/><span className="text-xs text-neutral">{new Date(pu.submissionDate).toLocaleDateString()}</span></td>
                             <td className="px-4 py-3 text-sm space-x-2">
                               <button
-                                onClick={() => { setApprovingPendingUser(pu); setUserForm({ email: pu.email, uniqueId: pu.uniqueId, displayName: pu.displayName, position: '', userInterests: '', phone: '', notificationPreference: 'email', role: pu.role, password: '', confirmPassword: '', referringAdminId: pu.referringAdminId || currentUser?.id || '' }); setEditingUserId(null); navigateTo(Page.UserManagement, {action: 'approveUser', userId: pu.id}); clearMessages(); }}
+                                onClick={() => { setApprovingPendingUser(pu); setUserForm({ id:'', email: pu.email, uniqueId: pu.uniqueId, displayName: pu.displayName, position: '', userInterests: '', phone: '', notificationPreference: 'email', role: pu.role, password: '', confirmPassword: '', referringAdminId: pu.referringAdminId || currentUser?.id || '', organizationId: currentUser.organizationId }); setEditingUserId(null); navigateTo(Page.UserManagement, {action: 'approveUser', userId: pu.id}); clearMessages(); }}
                                 className={`btn-success text-xs px-2 py-1 ${!canApprove ? 'opacity-50 cursor-not-allowed' : ''}`}
                                 disabled={!canApprove}
                                 title={!canApprove ? "Approval restricted." : "Approve this user"}
                               >
                                 Approve
                               </button>
-                              <button onClick={() => handleRejectPendingUser(pu.id)} className="btn-danger text-xs px-2 py-1">Reject</button>
+                              <button onClick={() => handleRejectPendingUser(pu.id)} className="btn-danger text-xs px-2 py-1" disabled={!canApprove}>Reject</button>
                             </td>
                           </tr>
                         );
@@ -1387,17 +1477,17 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
             <div className="bg-surface p-6 rounded-lg shadow-md">
               <h3 className="text-xl font-semibold text-accent mb-4">Active Users ({users.length})</h3>
-              {users.length === 0 ? <p className="text-neutral">No active users.</p> : (
+              {users.length === 0 ? <p className="text-neutral">No active users in your organization.</p> : (
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-bground"> <tr> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Name</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Email / System ID</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Role / Position</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Actions</th> </tr> </thead>
                     <tbody className="bg-surface divide-y divide-gray-200">
                       {users.map(user => ( <tr key={user.id}> <td className="px-4 py-3 text-sm font-medium text-textlight">{user.displayName}</td> <td className="px-4 py-3 text-sm text-textlight">{user.email}<br/><span className="text-xs text-neutral">{user.uniqueId}</span></td> <td className="px-4 py-3 text-sm text-textlight capitalize">{user.role}<br/><span className="text-xs text-neutral">{user.position}</span></td> <td className="px-4 py-3 text-sm space-x-2"> 
-                        {currentUser.id !== user.id && ( // Admins can edit other users, including other admins (profile details, not necessarily cross-tenant data)
-                            <button onClick={() => { setEditingUserId(user.id); setUserForm({ email: user.email, uniqueId: user.uniqueId, displayName: user.displayName, position: user.position, userInterests: user.userInterests || '', phone: user.phone || '', notificationPreference: user.notificationPreference || 'none', role: user.role, password: '', confirmPassword: '', referringAdminId: user.referringAdminId || '' }); setApprovingPendingUser(null); navigateTo(Page.UserManagement, {action: 'editUser', userId: user.id}); clearMessages(); }} className="btn-info text-xs px-2 py-1"> Edit </button> 
+                        {currentUser.id !== user.id && ( 
+                            <button onClick={() => { setEditingUserId(user.id); setUserForm({ ...user, password: '', confirmPassword: '' }); setApprovingPendingUser(null); navigateTo(Page.UserManagement, {action: 'editUser', userId: user.id}); clearMessages(); }} className="btn-info text-xs px-2 py-1"> Edit </button> 
                         )}
-                        {currentUser.id !== user.id && ( // Keep deletion of admins restrictive, or rely on backend policy
-                          <button onClick={() => handleDeleteUser(user.id)} className={`btn-danger text-xs px-2 py-1 ${user.role === 'admin' ? 'opacity-50 cursor-not-allowed' : ''}`} disabled={user.role === 'admin'} title={user.role === 'admin' ? "Deleting admin accounts has significant impact. Confirm policy." : "Delete user"}>Delete</button> 
+                        {currentUser.id !== user.id && ( 
+                          <button onClick={() => handleDeleteUser(user.id)} className={`btn-danger text-xs px-2 py-1 ${user.role === 'admin' && users.filter(u => u.role === 'admin').length <= 1 ? 'opacity-50 cursor-not-allowed' : ''}`} disabled={user.role === 'admin' && users.filter(u => u.role === 'admin').length <=1 } title={user.role === 'admin'  && users.filter(u => u.role === 'admin').length <=1 ? "Cannot delete the sole admin of the organization." : "Delete user"}>Delete</button> 
                         )} 
                         {currentUser.id === user.id && (
                            <button onClick={() => navigateTo(Page.UserProfile)} className="btn-neutral text-xs px-2 py-1">My Profile</button>
@@ -1413,23 +1503,23 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
 
         {currentPage === Page.ManagePrograms && currentUser.role === 'admin' && (
           <div className="space-y-6">
-            <h2 className="text-2xl font-semibold text-primary mb-6">Manage Programs</h2>
+            <h2 className="text-2xl font-semibold text-primary mb-6">Manage Programs (Organization: {currentUser.organizationId})</h2>
             <div className="bg-surface p-6 rounded-lg shadow-md"> <h3 className="text-xl font-semibold text-accent mb-4">Create Program</h3> <form onSubmit={handleCreateProgram} className="space-y-4"> <FormInput label="Program Name" id="programName" value={programForm.name} onChange={e => setProgramForm({...programForm, name: e.target.value})} required /> <FormTextarea label="Program Description" id="programDescription" value={programForm.description} onChange={e => setProgramForm({...programForm, description: e.target.value})} required /> <button type="submit" className="btn-primary">Create</button> </form> </div>
-            <div className="bg-surface p-6 rounded-lg shadow-md"> <h3 className="text-xl font-semibold text-accent mb-4">Existing Programs ({programs.length})</h3> {programs.length === 0 ? <p className="text-neutral">No programs.</p> : ( <ul className="space-y-3"> {programs.map(p => ( <li key={p.id} className="p-4 bg-bground rounded-md shadow flex justify-between items-start"> <div> <h4 className="font-semibold text-textlight">{p.name}</h4> <p className="text-sm text-neutral">{p.description}</p> </div> <button onClick={() => handleDeleteProgram(p.id)} className="btn-danger text-xs p-1 ml-2 self-start"><TrashIcon className="w-4 h-4"/></button> </li> ))} </ul> )} </div>
+            <div className="bg-surface p-6 rounded-lg shadow-md"> <h3 className="text-xl font-semibold text-accent mb-4">Existing Programs ({programs.length})</h3> {programs.length === 0 ? <p className="text-neutral">No programs in your organization.</p> : ( <ul className="space-y-3"> {programs.map(p => ( <li key={p.id} className="p-4 bg-bground rounded-md shadow flex justify-between items-start"> <div> <h4 className="font-semibold text-textlight">{p.name}</h4> <p className="text-sm text-neutral">{p.description}</p> </div> <button onClick={() => handleDeleteProgram(p.id)} className="btn-danger text-xs p-1 ml-2 self-start"><TrashIcon className="w-4 h-4"/></button> </li> ))} </ul> )} </div>
           </div>
         )}
 
         {currentPage === Page.ManageTasks && currentUser.role === 'admin' && (
           <div className="space-y-6">
-            <h2 className="text-2xl font-semibold text-primary mb-6">Manage Tasks</h2>
+            <h2 className="text-2xl font-semibold text-primary mb-6">Manage Tasks (Organization: {currentUser.organizationId})</h2>
              <div className="bg-surface p-6 rounded-lg shadow-md"> <h3 className="text-xl font-semibold text-accent mb-4">Create Task</h3> <form onSubmit={handleCreateTask} className="space-y-4"> <FormInput label="Task Title" id="taskTitle" value={taskForm.title} onChange={e => setTaskForm({...taskForm, title: e.target.value})} required /> <FormTextarea label="Description" id="taskDescription" value={taskForm.description} onChange={e => setTaskForm({...taskForm, description: e.target.value})} required /> <FormTextarea label="Required Skills (comma-separated)" id="taskRequiredSkills" value={taskForm.requiredSkills} onChange={e => setTaskForm({...taskForm, requiredSkills: e.target.value})} required placeholder="e.g., JS, Writing"/> <FormSelect label="Related Program (Optional)" id="taskProgramId" value={taskForm.programId} onChange={e => setTaskForm({...taskForm, programId: e.target.value})}> <option value="">None</option> {programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)} </FormSelect> <FormInput label="Deadline (Optional)" id="taskDeadline" type="date" value={taskForm.deadline} onChange={e => setTaskForm({...taskForm, deadline: e.target.value})} /> <button type="submit" className="btn-primary">Create Task</button> </form> </div>
-            <div className="bg-surface p-6 rounded-lg shadow-md"> <h3 className="text-xl font-semibold text-accent mb-4">Existing Tasks ({tasks.length})</h3> {tasks.length === 0 ? <p className="text-neutral">No tasks.</p> : ( <ul className="space-y-3"> {tasks.map(task => ( <li key={task.id} className="p-4 bg-bground rounded-md shadow"> <div className="flex justify-between items-start"> <div> <h4 className="font-semibold text-textlight">{task.title}</h4> <p className="text-sm text-neutral mt-1">{task.description}</p> <p className="text-xs text-neutral mt-1"><strong>Skills:</strong> {task.requiredSkills}</p> {task.programName && <p className="text-xs text-neutral mt-1"><strong>Program:</strong> {task.programName}</p>} {task.deadline && <p className="text-xs text-neutral mt-1"><strong>Deadline:</strong> {new Date(task.deadline).toLocaleDateString()}</p>} </div> <button onClick={() => handleDeleteTask(task.id)} className="btn-danger text-xs p-1 ml-2 self-start"><TrashIcon className="w-4 h-4"/></button> </div> <div className="mt-2 pt-2 border-t border-gray-300"> <p className="text-xs font-medium text-neutral">Assigned:</p> <ul className="text-xs list-disc list-inside pl-2"> {assignments.filter(a=>a.taskId===task.id).map(a=>(<li key={`${a.taskId}-${a.personId}`} className="text-neutral">{a.personName} - <span className={`font-semibold ${a.status==='completed_admin_approved'?'text-success':a.status==='declined_by_user'?'text-danger':a.status==='pending_acceptance'?'text-warning':'text-info'}`}>{a.status.replace(/_/g,' ')}</span></li>))} {assignments.filter(a=>a.taskId===task.id).length===0 && <li className="text-neutral">None.</li>}</ul></div></li>))}</ul>)}</div>
+            <div className="bg-surface p-6 rounded-lg shadow-md"> <h3 className="text-xl font-semibold text-accent mb-4">Existing Tasks ({tasks.length})</h3> {tasks.length === 0 ? <p className="text-neutral">No tasks in your organization.</p> : ( <ul className="space-y-3"> {tasks.map(task => ( <li key={task.id} className="p-4 bg-bground rounded-md shadow"> <div className="flex justify-between items-start"> <div> <h4 className="font-semibold text-textlight">{task.title}</h4> <p className="text-sm text-neutral mt-1">{task.description}</p> <p className="text-xs text-neutral mt-1"><strong>Skills:</strong> {task.requiredSkills}</p> {task.programName && <p className="text-xs text-neutral mt-1"><strong>Program:</strong> {task.programName}</p>} {task.deadline && <p className="text-xs text-neutral mt-1"><strong>Deadline:</strong> {new Date(task.deadline).toLocaleDateString()}</p>} </div> <button onClick={() => handleDeleteTask(task.id)} className="btn-danger text-xs p-1 ml-2 self-start"><TrashIcon className="w-4 h-4"/></button> </div> <div className="mt-2 pt-2 border-t border-gray-300"> <p className="text-xs font-medium text-neutral">Assigned:</p> <ul className="text-xs list-disc list-inside pl-2"> {assignments.filter(a=>a.taskId===task.id).map(a=>(<li key={`${a.taskId}-${a.personId}`} className="text-neutral">{a.personName} - <span className={`font-semibold ${a.status==='completed_admin_approved'?'text-success':a.status==='declined_by_user'?'text-danger':a.status==='pending_acceptance'?'text-warning':'text-info'}`}>{a.status.replace(/_/g,' ')}</span></li>))} {assignments.filter(a=>a.taskId===task.id).length===0 && <li className="text-neutral">None.</li>}</ul></div></li>))}</ul>)}</div>
           </div>
         )}
 
         {currentPage === Page.AssignWork && currentUser.role === 'admin' && (
           <div className="space-y-6">
-            <h2 className="text-2xl font-semibold text-primary mb-6">Assign Work</h2>
+            <h2 className="text-2xl font-semibold text-primary mb-6">Assign Work (Organization: {currentUser.organizationId})</h2>
             <div className="bg-surface p-6 rounded-lg shadow-md">
               <FormSelect label="Select Task" id="selectTaskForAssignment" value={selectedTaskForAssignment || ''} onChange={e => { setSelectedTaskForAssignment(e.target.value); setAssignmentSuggestion(null); clearMessages(); }}> <option value="">-- Select Task --</option> {tasks.map(t => (<option key={t.id} value={t.id}>{t.title}</option>))} </FormSelect>
               {selectedTaskForAssignment && ( <div className="mt-4 p-3 bg-bground rounded"> <h4 className="font-medium text-textlight">Selected Task:</h4> <p className="text-sm text-neutral">{tasks.find(t=>t.id === selectedTaskForAssignment)?.description}</p> <p className="text-xs text-neutral">Skills: {tasks.find(t=>t.id === selectedTaskForAssignment)?.requiredSkills}</p> {tasks.find(t=>t.id === selectedTaskForAssignment)?.deadline && <p className="text-xs">Deadline: {new Date(tasks.find(t=>t.id === selectedTaskForAssignment)!.deadline!).toLocaleDateString()}</p>} </div> )}
@@ -1447,7 +1537,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         {currentPage === Page.ViewAssignments && (
           <div className="space-y-6">
             <h2 className="text-2xl font-semibold text-primary mb-6">My Assignments</h2>
-            {assignments.filter(a => currentUser.role === 'admin' || a.personId === currentUser.id).length === 0 ? ( <p className="text-neutral bg-surface p-4 rounded-md shadow"> {currentUser.role === 'admin' ? "No assignments in system." : "No tasks assigned."} </p> ) : (
+            {assignments.filter(a => currentUser.role === 'admin' || a.personId === currentUser.id).length === 0 ? ( <p className="text-neutral bg-surface p-4 rounded-md shadow"> {currentUser.role === 'admin' ? "No assignments in your organization." : "No tasks assigned to you."} </p> ) : (
               <ul className="space-y-4">
                 {assignments.filter(a => currentUser.role === 'admin' || a.personId === currentUser.id).sort((x,y) => (x.deadline && y.deadline) ? new Date(x.deadline).getTime() - new Date(y.deadline).getTime() : 0).map(assignment => {
                     const task = tasks.find(t => t.id === assignment.taskId);
@@ -1464,7 +1554,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         )}
 
         {currentPage === Page.ViewTasks && (
-            <div className="space-y-6"> <h2 className="text-2xl font-semibold text-primary mb-6">Available Tasks</h2> {tasks.length === 0 ? ( <p className="text-neutral bg-surface p-4 rounded-md shadow">No tasks defined.</p> ) : (
+            <div className="space-y-6"> <h2 className="text-2xl font-semibold text-primary mb-6">Available Tasks (Your Organization)</h2> {tasks.length === 0 ? ( <p className="text-neutral bg-surface p-4 rounded-md shadow">No tasks defined in your organization.</p> ) : (
                 <ul className="space-y-4">
                     {tasks.map(task => {
                         const taskAssignments = assignments.filter(a => a.taskId === task.id);
