@@ -1,16 +1,20 @@
-import React from 'react';
+
+import React, { useState, useEffect, useRef } from 'react';
 import { Page, User } from '../types'; // Adjust path as needed
-import NavLink from './NavLink'; // Adjust path as needed
 import {
+  BriefcaseIcon,
+  UserCircleIcon,
+  LogoutIcon,
+  Bars3Icon,
+  XMarkIcon,
+  LightBulbIcon, // Retained for consistency, though HomeIcon is used for Dashboard now
   UsersIcon,
   ClipboardListIcon,
-  LightBulbIcon,
   CheckCircleIcon,
   PlusCircleIcon,
-  BriefcaseIcon,
-  LogoutIcon,
-  UserCircleIcon
-} from './Icons'; // Adjust path as needed
+  Cog6ToothIcon,
+  HomeIcon // Added for Dashboard
+} from './Icons'; // Corrected to relative path
 
 interface TopNavbarProps {
   currentUser: User;
@@ -19,53 +23,180 @@ interface TopNavbarProps {
   handleLogout: () => void;
 }
 
+interface NavItem {
+  page: Page;
+  label: string;
+  icon: JSX.Element;
+  adminOnly?: boolean;
+  userOnly?: boolean;
+}
+
 const TopNavbar: React.FC<TopNavbarProps> = ({ currentUser, currentPage, navigateTo, handleLogout }) => {
-  const navLinkBaseClass = "top-nav-link-style px-2 py-1.5 md:px-3 md:py-1.5"; // Added md prefix for slightly larger padding on medium screens
-  const iconBaseClass = "w-4 h-4 md:w-5 md:h-5 mr-1 md:mr-1.5"; // Responsive icon size
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  
+  const userMenuRef = useRef<HTMLDivElement>(null);
+  const mobileMenuButtonRef = useRef<HTMLButtonElement>(null); 
+  const mobileMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setIsUserMenuOpen(false);
+      }
+      if (mobileMenuButtonRef.current && !mobileMenuButtonRef.current.contains(event.target as Node)) {
+         if (isMobileMenuOpen && mobileMenuRef.current && !mobileMenuRef.current.contains(event.target as Node)) {
+            setIsMobileMenuOpen(false);
+         }
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isMobileMenuOpen]);
+
+
+  const navItems: NavItem[] = [
+    { page: Page.Dashboard, label: "Dashboard", icon: <HomeIcon className="w-5 h-5" />, adminOnly: true },
+    { page: Page.UserManagement, label: "Users", icon: <UsersIcon className="w-5 h-5" />, adminOnly: true },
+    { page: Page.ManagePrograms, label: "Programs", icon: <ClipboardListIcon className="w-5 h-5" />, adminOnly: true },
+    { page: Page.ManageTasks, label: "Manage Tasks", icon: <CheckCircleIcon className="w-5 h-5" />, adminOnly: true },
+    { page: Page.AssignWork, label: "Assign Work", icon: <PlusCircleIcon className="w-5 h-5" />, adminOnly: true },
+    { page: Page.ViewAssignments, label: "My Assignments", icon: <ClipboardListIcon className="w-5 h-5" /> },
+    { page: Page.ViewTasks, label: "Available Tasks", icon: <CheckCircleIcon className="w-5 h-5" /> },
+  ];
+
+  const filteredNavItems = navItems.filter(item => {
+    if (item.adminOnly && currentUser.role !== 'admin') return false;
+    if (item.userOnly && currentUser.role !== 'user') return false;
+    return true;
+  });
+
+  const desktopLinkClasses = (page: Page) => `
+    flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors
+    ${currentPage === page ? 'bg-primary text-white shadow-sm' : 'text-textlight hover:bg-bground hover:text-primary'}
+  `;
+  
+  const mobileLinkClasses = (page: Page) => `
+    flex items-center px-3 py-2 rounded-md text-base font-medium transition-colors
+    ${currentPage === page ? 'bg-primary text-white shadow-sm' : 'text-textlight hover:bg-bground hover:text-primary'}
+  `;
 
   return (
-    <header className="bg-primary text-white shadow-lg flex items-center justify-between p-3 sticky top-0 z-50">
-      {/* Left Section: Logo and Title */}
-      <div className="flex items-center flex-shrink-0">
-        <BriefcaseIcon className="w-7 h-7 md:w-8 md:h-8 mr-2 text-white" />
-        <h1 className="text-lg md:text-xl font-semibold text-white hidden sm:block">TAA</h1>
-        <p className="text-xs text-blue-200 ml-2 hidden lg:block">Task Assignment Assistant</p>
-      </div>
+    <nav className="bg-surface shadow-lg sticky top-0 z-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-16">
+          {/* Left side: Logo and Desktop Nav Links */}
+          <div className="flex items-center">
+            <button
+              onClick={() => navigateTo(currentUser.role === 'admin' ? Page.Dashboard : Page.ViewAssignments)}
+              className="flex-shrink-0 flex items-center text-primary hover:opacity-80 transition-opacity"
+              aria-label="Go to dashboard"
+            >
+              <BriefcaseIcon className="block h-8 w-auto text-secondary" />
+              <span className="ml-2 font-semibold text-xl text-textlight">TAA</span>
+            </button>
+            <div className="hidden md:ml-6 md:flex md:space-x-1 lg:space-x-3">
+              {filteredNavItems.map(item => (
+                <button
+                  key={item.page}
+                  onClick={() => navigateTo(item.page)}
+                  className={desktopLinkClasses(item.page)}
+                  aria-current={currentPage === item.page ? 'page' : undefined}
+                >
+                  {React.cloneElement(item.icon, { className: "mr-1.5 h-5 w-5 hidden sm:inline-block"})}
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
 
-      {/* Center Section: Navigation Links */}
-      <nav className="flex-grow flex justify-center items-center space-x-1 md:space-x-1.5 overflow-x-auto">
-        {currentUser.role === 'admin' && (
-          <>
-            <NavLink page={Page.Dashboard} current={currentPage} icon={<LightBulbIcon className={iconBaseClass}/>} navigateTo={navigateTo} className={navLinkBaseClass}>Dashboard</NavLink>
-            <NavLink page={Page.UserManagement} current={currentPage} icon={<UsersIcon className={iconBaseClass}/>} navigateTo={navigateTo} className={navLinkBaseClass}>Users</NavLink>
-            <NavLink page={Page.ManagePrograms} current={currentPage} icon={<ClipboardListIcon className={iconBaseClass}/>} navigateTo={navigateTo} className={navLinkBaseClass}>Programs</NavLink>
-            <NavLink page={Page.ManageTasks} current={currentPage} icon={<CheckCircleIcon className={iconBaseClass}/>} navigateTo={navigateTo} className={navLinkBaseClass}>Tasks</NavLink>
-            <NavLink page={Page.AssignWork} current={currentPage} icon={<PlusCircleIcon className={iconBaseClass}/>} navigateTo={navigateTo} className={navLinkBaseClass}>Assign</NavLink>
-          </>
-        )}
-        <NavLink page={Page.ViewAssignments} current={currentPage} icon={<ClipboardListIcon className={iconBaseClass}/>} navigateTo={navigateTo} className={navLinkBaseClass}>My Assignments</NavLink>
-        <NavLink page={Page.ViewTasks} current={currentPage} icon={<CheckCircleIcon className={iconBaseClass}/>} navigateTo={navigateTo} className={navLinkBaseClass}>Available Tasks</NavLink>
-        <NavLink page={Page.UserProfile} current={currentPage} icon={<UserCircleIcon className={iconBaseClass}/>} navigateTo={navigateTo} className={navLinkBaseClass}>Profile</NavLink>
-      </nav>
+          {/* Right side: User Menu and Mobile Menu Button */}
+          <div className="flex items-center">
+            <div className="relative ml-3" ref={userMenuRef}>
+              <button
+                type="button"
+                className="max-w-xs bg-surface flex items-center text-sm rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-bground focus:ring-primary p-1"
+                id="user-menu-button"
+                aria-expanded={isUserMenuOpen}
+                aria-haspopup="true"
+                onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+              >
+                <span className="sr-only">Open user menu</span>
+                <UserCircleIcon className="h-8 w-8 text-neutral hover:text-primary transition-colors" />
+                <span className="ml-2 hidden sm:inline text-sm text-textlight font-medium hover:text-primary transition-colors">{currentUser.displayName}</span>
+              </button>
+              {isUserMenuOpen && (
+                <div
+                  className="origin-top-right absolute right-0 mt-2 w-56 rounded-md shadow-xl py-1 bg-surface ring-1 ring-neutral ring-opacity-20 focus:outline-none"
+                  role="menu"
+                  aria-orientation="vertical"
+                  aria-labelledby="user-menu-button"
+                >
+                  <div className="px-4 py-3 border-b border-bground">
+                    <p className="text-sm font-medium text-textlight truncate">{currentUser.displayName}</p>
+                    <p className="text-xs text-neutral truncate">{currentUser.email}</p>
+                  </div>
+                  <button
+                    onClick={() => { navigateTo(Page.UserProfile); setIsUserMenuOpen(false); }}
+                    className="w-full text-left px-4 py-2 text-sm text-textlight hover:bg-bground hover:text-primary transition-colors flex items-center"
+                    role="menuitem"
+                  >
+                    <Cog6ToothIcon className="w-5 h-5 mr-2 text-neutral" /> My Profile
+                  </button>
+                  <button
+                    onClick={() => { handleLogout(); setIsUserMenuOpen(false); }}
+                    className="w-full text-left px-4 py-2 text-sm text-danger hover:bg-red-50 hover:text-red-700 transition-colors flex items-center"
+                    role="menuitem"
+                  >
+                   <LogoutIcon className="w-5 h-5 mr-2" /> Logout
+                  </button>
+                </div>
+              )}
+            </div>
 
-      {/* Right Section: User Info and Logout */}
-      <div className="flex items-center space-x-2 md:space-x-3 flex-shrink-0">
-        <div className="text-right hidden md:block">
-            <p className="text-sm font-medium text-white truncate max-w-[100px] lg:max-w-[150px]" title={currentUser.displayName}>{currentUser.displayName}</p>
-            <p className="text-xs text-blue-200 capitalize truncate  max-w-[100px] lg:max-w-[150px]" title={currentUser.position}>{currentUser.position}</p>
+            <div className="ml-2 -mr-2 flex md:hidden">
+              <button
+                ref={mobileMenuButtonRef} 
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                type="button"
+                className="bg-surface inline-flex items-center justify-center p-2 rounded-md text-neutral hover:text-primary hover:bg-bground focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
+                aria-controls="mobile-menu"
+                aria-expanded={isMobileMenuOpen}
+                id="mobile-menu-button"
+              >
+                <span className="sr-only">Open main menu</span>
+                {isMobileMenuOpen ? (
+                  <XMarkIcon className="block h-6 w-6" aria-hidden="true" />
+                ) : (
+                  <Bars3Icon className="block h-6 w-6" aria-hidden="true" />
+                )}
+              </button>
+            </div>
+          </div>
         </div>
-         <UserCircleIcon className="w-7 h-7 md:w-8 md:h-8 text-white block md:hidden" title={`${currentUser.displayName} (${currentUser.position})`}/>
-        <button
-          onClick={handleLogout}
-          className="flex items-center justify-center p-1.5 md:px-3 md:py-1.5 border border-transparent rounded-md shadow-sm text-xs md:text-sm font-medium text-white bg-danger hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-primary focus:ring-danger transition-colors"
-          aria-label="Logout"
-          title="Logout"
-        >
-          <LogoutIcon className="w-4 h-4 md:w-5 md:h-5 md:mr-1.5" />
-          <span className="hidden md:inline">Logout</span>
-        </button>
       </div>
-    </header>
+
+      {/* Mobile Menu */}
+      {isMobileMenuOpen && (
+        <div className="md:hidden border-t border-bground" id="mobile-menu" ref={mobileMenuRef}>
+          <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3">
+            {filteredNavItems.map(item => (
+              <button
+                key={item.page}
+                onClick={() => { navigateTo(item.page); setIsMobileMenuOpen(false); }}
+                className={mobileLinkClasses(item.page)}
+                aria-current={currentPage === item.page ? 'page' : undefined}
+              >
+                {React.cloneElement(item.icon, { className: "mr-3 h-5 w-5" })}
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </nav>
   );
 };
 

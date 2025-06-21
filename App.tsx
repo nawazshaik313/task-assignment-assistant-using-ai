@@ -3,8 +3,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Page, User, Role, Task, Assignment, Program, GeminiSuggestion, NotificationPreference, AssignmentStatus, PendingUser, AdminLogEntry } from './types';
 import useLocalStorage from './hooks/useLocalStorage';
 import { getAssignmentSuggestion } from './services/geminiService';
-import * as emailService from './src/utils/emailService'; // Corrected import path
-import { validatePassword } from './src/utils/validation'; // Corrected import path
+import * as emailService from './utils/emailService'; // Corrected import path
+import { validatePassword } from './utils/validation'; // Corrected import path
 // import * //as cloudDataService from './services/cloudDataService'; // Deactivated
 import LoadingSpinner from './components/LoadingSpinner';
 import { UsersIcon, ClipboardListIcon, LightBulbIcon, CheckCircleIcon, TrashIcon, PlusCircleIcon, KeyIcon, BriefcaseIcon, LogoutIcon, UserCircleIcon } from './components/Icons';
@@ -17,17 +17,10 @@ const API_BASE_URL = 'https://task-management-backend-17a5.onrender.com';
 const JWT_TOKEN_KEY = 'task-assign-jwt';
 
 // --- START OF NEW AUTH FORM COMPONENTS ---
-const AuthFormInput: React.FC<React.InputHTMLAttributes<HTMLInputElement> & { 
-  id: string; 
-  'aria-label': string;
-  value: string; // Explicitly define value
-  onChange: (event: React.ChangeEvent<HTMLInputElement>) => void; // Explicitly define onChange
-}> = ({ id, value, onChange, ...props }) => ( // Destructure value and onChange
+const AuthFormInput: React.FC<React.InputHTMLAttributes<HTMLInputElement> & { id: string; 'aria-label': string }> = ({ id, ...props }) => (
   <input
     id={id}
-    value={value} // Pass explicitly
-    onChange={onChange} // Pass explicitly
-    {...props} // Spread other props like type, placeholder, required, etc.
+    {...props}
     className="w-full p-3 bg-authFormBg border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm text-textlight placeholder-neutral"
   />
 );
@@ -150,7 +143,6 @@ const fetchData = async <T,>(endpoint: string, options: RequestInit = {}, defaul
         let errorData: any = null;
         try { errorData = JSON.parse(errorText); } catch (e) { /* use raw text */ }
         console.error(`Auth Error for ${endpoint}: ${response.status}. Body: ${errorText}`);
-        // Throwing here will be caught by the outer catch, which then returns defaultReturnVal.
         throw new Error(errorData?.message || errorText || `Authentication/Authorization failed with status ${response.status}`);
     }
 
@@ -166,9 +158,8 @@ const fetchData = async <T,>(endpoint: string, options: RequestInit = {}, defaul
       }
       console.error(`API Error for ${endpoint}: ${response.status} ${response.statusText}. Body: ${responseText}`, errorData);
       if (response.status === 404) {
-        return defaultReturnVal; // This is a valid return path
+        return defaultReturnVal;
       }
-      // Throwing here will be caught by the outer catch, which then returns defaultReturnVal.
       throw new Error(errorData?.message || errorData?.error || responseText || `Request failed with status ${response.status}`);
     }
 
@@ -178,15 +169,12 @@ const fetchData = async <T,>(endpoint: string, options: RequestInit = {}, defaul
 
     const parsedData = JSON.parse(responseText);
     return parsedData as T;
-  } catch (error: any) { // Catch errors from fetch() itself or explicit throws from the try block
-    console.error(`Error in fetchData for ${endpoint}: ${error.message}`);
-     if (error.message.includes("Failed to fetch")) {
-        // Log a more specific message for network errors that will be "swallowed" into a defaultReturnVal
-        console.error(`Network error: Could not connect to the server at ${API_BASE_URL}. Endpoint: ${endpoint}. Details: ${error.message}`);
+  } catch (error) {
+    console.error(`Network or parsing error for ${endpoint}:`, error);
+     if (error instanceof Error && error.message.includes("Failed to fetch")) {
+        throw new Error(`Network error: Could not connect to the server at ${API_BASE_URL}. Please check your internet connection and the server status.`);
     }
-    // For all errors caught here, return defaultReturnVal to satisfy TypeScript's "must return a value" rule.
-    // The actual error is logged to the console.
-    return defaultReturnVal;
+    throw error;
   }
 };
 
@@ -201,21 +189,20 @@ export const App = (): JSX.Element => {
   const [programs, setPrograms] = useState<Program[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [adminLogs, setAdminLogs] = useState<AdminLogEntry[]>([]);
-  const [isLoadingAppData, setIsLoadingAppData] = useState<boolean>(true);
-  const [isRefreshingDashboard, setIsRefreshingDashboard] = useState<boolean>(false);
+  const [isLoadingAppData, setIsLoadingAppData] = useState<boolean>(true); 
 
 
   const [authView, setAuthView] = useState<'login' | 'register'>('login');
   const [newLoginForm, setNewLoginForm] = useState({ email: '', password: '' });
   const [newRegistrationForm, setNewRegistrationForm] = useState({
-    name: '',
+    name: '', 
     email: '',
     password: '',
     confirmPassword: '',
-    role: 'user' as Role,
-    uniqueId: '',
+    role: 'user' as Role, 
+    uniqueId: '', 
     position: '',
-    companyName: '', // For admin UI when creating new "site", changed from organizationName
+    organizationName: '', // For admin UI when creating new "site"
   });
 
   const [adminRegistrationForm, setAdminRegistrationForm] = useState(initialAdminRegistrationState);
@@ -225,7 +212,7 @@ export const App = (): JSX.Element => {
       id: '', email: '', uniqueId: '', password: '', confirmPassword: '',
       displayName: '', position: '', userInterests: '',
       phone: '', notificationPreference: 'none' as NotificationPreference,
-      role: 'user' as Role,
+      role: 'user' as Role, 
       referringAdminId: '',
       organizationId: '' // Will be set from currentUser or context
   };
@@ -266,77 +253,36 @@ export const App = (): JSX.Element => {
     }
   };
 
-  const addAdminLogEntry = useCallback(async (logText: string, imagePreviewUrl?: string) => {
-    if (!currentUser || currentUser.role !== 'admin') {
-      console.warn("Admin log attempt by non-admin or no current user.");
-      return;
-    }
-
-    const logData = {
-      logText,
-      imagePreviewUrl,
-    };
-
-    try {
-      const newLog = await fetchData<AdminLogEntry>('/admin-logs', {
-        method: 'POST',
-        body: JSON.stringify(logData),
-      });
-
-      if (newLog && newLog.id) {
-        setAdminLogs(prevLogs => [newLog, ...prevLogs].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
-        console.log('[App.tsx] Admin log entry added locally:', newLog);
-      } else {
-        console.error("[App.tsx] Failed to create admin log entry or API returned invalid data. NewLog:", newLog);
-        // setError("Failed to record admin activity."); // Optional: if you want to show users this error
-      }
-    } catch (error: any) {
-      // This catch block is mostly for unexpected errors if fetchData itself changes to throw
-      console.error('Unexpected error in addAdminLogEntry:', error);
-      // setError(`Failed to record admin activity: ${error.message}`); // Optional
-    }
-  }, [currentUser]);
-
-
   const loadInitialData = useCallback(async (loggedInUserTokenData?: User) => { // Token data includes orgId
     setIsLoadingAppData(true);
     setError(null); // Clear previous errors on new load attempt
     try {
       let activeUserWithFullProfile: User | null = null;
-
-      if (loggedInUserTokenData && loggedInUserTokenData.token && loggedInUserTokenData.organizationId) {
-          setCurrentUserInternal(loggedInUserTokenData); // Tentatively set currentUser based on token
-          // Ensure token from loggedInUserTokenData is in localStorage for subsequent fetchData calls
-          localStorage.setItem(JWT_TOKEN_KEY, loggedInUserTokenData.token);
+      
+      if (loggedInUserTokenData && loggedInUserTokenData.token) {
+          setCurrentUserInternal(loggedInUserTokenData); 
           const userFromServer = await fetchData<BackendUser>('/users/current', {}, null);
-          if (userFromServer && userFromServer.organizationId === loggedInUserTokenData.organizationId) {
+          if (userFromServer) {
             activeUserWithFullProfile = { ...userFromServer, id: userFromServer.id || userFromServer._id!, token: loggedInUserTokenData.token };
-            setCurrentUserInternal(activeUserWithFullProfile); // Final set from server
-          } else {
-            console.warn("loadInitialData: Backend validation of token failed or org ID mismatch. Logging out.", { tokenOrg: loggedInUserTokenData.organizationId, serverUser: userFromServer });
+            setCurrentUserInternal(activeUserWithFullProfile);
+          } else { 
             localStorage.removeItem(JWT_TOKEN_KEY);
             setCurrentUserInternal(null);
           }
-      } else if (!loggedInUserTokenData) { // No pre-decoded token, check localStorage directly
+      } else {
         const token = localStorage.getItem(JWT_TOKEN_KEY);
         if (token) {
            const userFromServer = await fetchData<BackendUser>('/users/current', {}, null);
-           if (userFromServer && userFromServer.organizationId) {
+           if (userFromServer) {
              activeUserWithFullProfile = { ...userFromServer, id: userFromServer.id || userFromServer._id!, token };
              setCurrentUserInternal(activeUserWithFullProfile);
-           } else {
-             console.warn("loadInitialData: Token from localStorage invalid or user lacks orgId on backend. Logging out.", { serverUser: userFromServer });
+           } else { 
              localStorage.removeItem(JWT_TOKEN_KEY);
              setCurrentUserInternal(null);
            }
         }
-        // If no token in localStorage, activeUserWithFullProfile remains null.
-      } else { // loggedInUserTokenData exists, but is missing token or orgId (should be caught by initial useEffect)
-        console.warn("loadInitialData: loggedInUserTokenData provided but incomplete. Logging out.", { loggedInUserTokenData });
-        localStorage.removeItem(JWT_TOKEN_KEY);
-        setCurrentUserInternal(null);
       }
-
+      
       if (activeUserWithFullProfile) {
         const [
           loadedUsers, loadedPendingUsers, loadedTasks, loadedPrograms, loadedAssignments, loadedAdminLogs,
@@ -355,16 +301,14 @@ export const App = (): JSX.Element => {
         setPrograms(loadedPrograms || []);
         setAssignments(loadedAssignments || []);
         setAdminLogs(loadedAdminLogs || []);
-        console.log('[App.tsx] Initial Loaded Admin Logs:', loadedAdminLogs);
       } else {
-        // No active user, clear all data arrays
         setUsers([]); setPendingUsers([]); setTasks([]); setPrograms([]); setAssignments([]); setAdminLogs([]);
       }
-      // console.log("Initial data processed. currentUser:", activeUserWithFullProfile ? activeUserWithFullProfile.email : "null");
+      console.log("Initial data processed based on user session.");
     } catch (err: any) {
       console.error("Critical error during initial data load:", err);
       setError("Failed to load application data. Error: " + err.message);
-      if (err.message.includes("Authentication/Authorization failed") ||
+      if (err.message.includes("Authentication/Authorization failed") || 
           err.message.includes("Token is missing organization information") ||
           err.message.includes("Invalid or expired token")) {
         setCurrentUser(null); // This will also remove JWT_TOKEN_KEY
@@ -373,8 +317,7 @@ export const App = (): JSX.Element => {
     } finally {
       setIsLoadingAppData(false);
     }
-  }, [addAdminLogEntry]); // addAdminLogEntry is stable due to useCallback, but including if it were to change or for explicitness with linters. Usually, only state setters or passed-down functions that might change.
-
+  }, []); 
 
   useEffect(() => {
     if (!currentUser) {
@@ -386,27 +329,23 @@ export const App = (): JSX.Element => {
                 const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
                     return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
                 }).join(''));
-                const decodedTokenUser = JSON.parse(jsonPayload) as User;
+                const decodedTokenUser = JSON.parse(jsonPayload) as User; 
                 if (decodedTokenUser && decodedTokenUser.id && decodedTokenUser.organizationId) {
                      loadInitialData({ ...decodedTokenUser, token });
                 } else {
-                    console.warn("Token found in localStorage but was incomplete (missing id or organizationId). Clearing token.");
-                    localStorage.removeItem(JWT_TOKEN_KEY);
-                    setCurrentUserInternal(null);
-                    setIsLoadingAppData(false); // Ensure loading state is updated
+                    localStorage.removeItem(JWT_TOKEN_KEY); 
+                    loadInitialData(); 
                 }
             } catch (e) {
-                console.error("Failed to parse token from localStorage. Clearing token.", e);
+                console.error("Failed to parse token from localStorage", e);
                 localStorage.removeItem(JWT_TOKEN_KEY);
-                setCurrentUserInternal(null);
-                setIsLoadingAppData(false); // Ensure loading state is updated
+                loadInitialData(); 
             }
         } else {
-             // No token in localStorage, loadInitialData will handle setting isLoadingAppData to false.
-            loadInitialData();
+            loadInitialData(); 
         }
     }
-  }, [currentUser, loadInitialData]);
+  }, [loadInitialData, currentUser]);
 
 
   const setPreRegistrationForm = (value: React.SetStateAction<typeof initialPreRegistrationFormState>) => {
@@ -416,10 +355,14 @@ export const App = (): JSX.Element => {
   const navigateTo = useCallback((page: Page, params?: Record<string, string>) => { let hash = `#${page}`; if (params && Object.keys(params).length > 0) { hash += `?${new URLSearchParams(params).toString()}`; } if (window.location.hash !== hash) { window.location.hash = hash; } else { _setCurrentPageInternal(page); } }, []);
 
   useEffect(() => {
+    // Wait for initial data loading to complete, especially if there's no current user yet.
+    // This prevents premature redirection to login if a token is being validated.
     if (isLoadingAppData && !currentUser && localStorage.getItem(JWT_TOKEN_KEY)) {
-        return;
+        return; 
     }
-
+    // If loading is done and there's still no current user (even if there was a token, it might have been invalid)
+    // then proceed with routing (which will likely lead to login page if hash is not login/prereg).
+    
     const processHash = () => {
       clearMessages();
       const hash = window.location.hash.substring(1);
@@ -429,44 +372,18 @@ export const App = (): JSX.Element => {
 
       if (targetPageFromHashPath === Page.PreRegistration) {
         const refAdminIdFromHash = params.get('refAdminId');
-        if (!refAdminIdFromHash) {
+        // Fetch users to find admin display name, but don't block rendering.
+        // Backend will validate refAdminId and determine organization.
+        // This is primarily for display purposes on the pre-reg form.
+        fetchData<User[]>(`/users?role=admin&id=${refAdminIdFromHash}`, {}, []).then(admins => {
+            const adminUser = admins ? admins.find(u => u.id === refAdminIdFromHash) : null;
             setPreRegistrationForm(prev => ({
-                ...initialPreRegistrationFormState, // Reset other fields
-                referringAdminId: '',
-                referringAdminDisplayName: 'N/A (No ID Provided)',
-                isReferralLinkValid: false
+              ...initialPreRegistrationFormState,
+              referringAdminId: refAdminIdFromHash || '',
+              referringAdminDisplayName: adminUser ? adminUser.displayName : (refAdminIdFromHash ? `Admin (Site ID: ${refAdminIdFromHash})`: 'an administrator'),
+              isReferralLinkValid: !!refAdminIdFromHash 
             }));
-        } else {
-            fetchData<{ success: boolean; isValidRef: boolean; displayName?: string; organizationId?: string; message?: string }>(
-                `/users/validate-admin-ref/${refAdminIdFromHash}`,
-                {},
-                null
-            ).then(validationResult => {
-                if (validationResult && validationResult.success && validationResult.isValidRef && validationResult.displayName) {
-                    setPreRegistrationForm(prev => ({
-                        ...initialPreRegistrationFormState, // Reset other fields like uniqueId, password etc.
-                        referringAdminId: refAdminIdFromHash,
-                        referringAdminDisplayName: validationResult.displayName,
-                        isReferralLinkValid: true
-                    }));
-                } else {
-                    setPreRegistrationForm(prev => ({
-                        ...initialPreRegistrationFormState,
-                        referringAdminId: refAdminIdFromHash,
-                        referringAdminDisplayName: `Invalid Admin Link (${validationResult?.message || 'Validation failed'})`,
-                        isReferralLinkValid: false
-                    }));
-                }
-            }).catch(err => {
-                console.error("Error validating admin ref for pre-registration:", err);
-                setPreRegistrationForm(prev => ({
-                    ...initialPreRegistrationFormState,
-                    referringAdminId: refAdminIdFromHash,
-                    referringAdminDisplayName: 'Error validating link',
-                    isReferralLinkValid: false
-                }));
-            });
-        }
+        });
         _setCurrentPageInternal(Page.PreRegistration);
         return;
       }
@@ -486,45 +403,13 @@ export const App = (): JSX.Element => {
         newPage = defaultPageDetermination;
       }
 
-      _setCurrentPageInternal(newPage); // Set page first
-
-      // If admin navigates to Dashboard or UserManagement, re-fetch key lists for freshness
-      if (currentUser && currentUser.role === 'admin' &&
-          (newPage === Page.Dashboard || newPage === Page.UserManagement) &&
-          (isLoadingAppData === false)
-      ) {
-          const currentTokenInStorage = localStorage.getItem(JWT_TOKEN_KEY);
-          if (!currentTokenInStorage) {
-              console.warn(`Admin data re-fetch for ${newPage} aborted: Token disappeared from localStorage just before fetch.`);
-              setError("Your session may have expired or the token was cleared. Please log in again.");
-              setCurrentUser(null);
-              navigateTo(Page.Login);
-              // Do not return here, let the rest of processHash run which might also redirect to Login.
-          } else {
-            Promise.all([
-                fetchData<User[]>('/users', {}, []),
-                fetchData<PendingUser[]>('/pending-users', {}, [])
-            ]).then(([loadedUsers, loadedPendingUsers]) => {
-                if (loadedUsers) setUsers(loadedUsers);
-                if (loadedPendingUsers) setPendingUsers(loadedPendingUsers);
-            }).catch(err => {
-                console.error("Error re-fetching admin data on navigation:", err);
-                setError("Could not refresh admin data: " + err.message);
-                 if (err.message.toLowerCase().includes("access token missing") || err.message.toLowerCase().includes("invalid or expired token")) {
-                    setCurrentUser(null);
-                    navigateTo(Page.Login);
-                }
-            });
-          }
-      }
-
-
       const currentTopLevelPagePath = window.location.hash.substring(1).split('?')[0].toUpperCase();
       const targetParams = paramsString ? Object.fromEntries(params) : undefined;
 
       if (newPage !== currentTopLevelPagePath && Object.values(Page).includes(newPage)) {
            navigateTo(newPage, targetParams);
       }
+      _setCurrentPageInternal(newPage);
 
       if (currentUser && currentUser.role === 'user' && !localStorage.getItem(`hasCompletedUserTour_${currentUser.id}`)) {
          setTimeout(() => {
@@ -570,21 +455,21 @@ export const App = (): JSX.Element => {
       const refAdmin = users.find(u => u.id === referringAdminId && u.role === 'admin');
       if (refAdmin) return refAdmin;
     }
-    return users.find(u => u.role === 'admin');
+    return users.find(u => u.role === 'admin'); 
   }, [users]);
 
 const handleNewRegistration = async (e: React.FormEvent) => {
   e.preventDefault();
   clearMessages();
 
-  const { name, email, password, confirmPassword, uniqueId, position, role, companyName } = newRegistrationForm; // Changed organizationName to companyName
+  const { name, email, password, confirmPassword, uniqueId, position, role, organizationName } = newRegistrationForm;
 
   if (!name.trim() || !email.trim() || !password.trim() || !confirmPassword.trim() || !uniqueId.trim()) {
     setError("Full Name, Email, Password, Confirm Password, and System ID are required.");
     return;
   }
-  if (role === 'admin' && !companyName.trim()) { // Changed organizationName to companyName
-      setError("Company Name is required when registering as an Administrator for a new site.");
+  if (role === 'admin' && !organizationName.trim()) {
+      setError("Organization Name is required when registering as an Administrator for a new site.");
       return;
   }
   if (!/\S+@\S+\.\S+/.test(email)) {
@@ -602,44 +487,37 @@ const handleNewRegistration = async (e: React.FormEvent) => {
   }
 
   const registrationData: any = {
-    displayName: name.trim(),
-    email: email.trim(),
-    password: password, // Do not trim password
+    displayName: name,
+    email,
+    password,
     role: role,
-    uniqueId: uniqueId.trim(),
-    position: position.trim() || (role === 'admin' ? 'Administrator' : 'User Position'),
-    companyName: role === 'admin' ? companyName.trim() : undefined, // Changed organizationName to companyName
+    uniqueId,
+    position: position || (role === 'admin' ? 'Administrator' : 'User Position'),
+    organizationName: role === 'admin' ? organizationName : undefined, 
   };
 
-  const endpoint = '/users/register';
+  const endpoint = '/users/register'; 
 
   try {
-    const response = await fetchData<{ success: boolean; user: BackendUser | BackendPendingUser; message?: string, errors?: Record<string,string> }>(endpoint, {
+    const response = await fetchData<{ success: boolean; user: BackendUser | BackendPendingUser; message?: string }>(endpoint, {
       method: 'POST',
       body: JSON.stringify(registrationData),
     });
 
     if (response && response.success && response.user) {
       const createdEntity = response.user;
-
+      
       if ('role' in createdEntity && createdEntity.role === 'admin') { // Assuming BackendUser for admin
-         setSuccessMessage(`Administrator account for company '${companyName}' registered successfully! You can now log in.`); // Changed organizationName to companyName
+         setSuccessMessage(`Administrator account for organization '${organizationName}' registered successfully! You can now log in.`);
       } else { // Could be BackendPendingUser or BackendUser if auto-approved user
          setSuccessMessage(`User account for ${createdEntity.displayName} registered. If admin approval is needed, you'll be notified.`);
       }
 
-      // Pass companyName to email service if admin
-      const companyNameToEmail = role === 'admin' ? companyName : '';
-      emailService.sendWelcomeRegistrationEmail(createdEntity.email, createdEntity.displayName, createdEntity.role, companyNameToEmail); // Pass companyName
-      setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user', uniqueId: '', position: '', companyName: '' }); // Changed organizationName to companyName
+      emailService.sendWelcomeRegistrationEmail(createdEntity.email, createdEntity.displayName, createdEntity.role);
+      setNewRegistrationForm({ name: '', email: '', password: '', confirmPassword: '', role: 'user', uniqueId: '', position: '', organizationName: '' });
       setAuthView('login');
     } else {
-      let mainError = response?.message || "Registration failed. Please check details and try again.";
-      if(response?.errors){
-        const fieldErrors = Object.entries(response.errors).map(([field, msg]) => `${field}: ${msg}`).join('; ');
-        mainError = `${mainError} (${fieldErrors})`;
-      }
-      setError(mainError);
+      setError(response?.message || "Registration failed. Please check details and try again.");
     }
   } catch (err: any) {
     setError(err.message || "Registration failed. Please try again later.");
@@ -669,43 +547,28 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     setError(passwordValidationResult.errors.join(" "));
     return;
   }
-
+  
   const newPendingUserData = {
-    uniqueId: uniqueId.trim(),
-    displayName: displayName.trim(),
-    email: email.trim(),
-    password: password, // Do not trim password
+    uniqueId, displayName, email, password,
     role: 'user' as Role, // Pre-registrations are for 'user' role.
     referringAdminId: referringAdminId || undefined
     // organizationId will be determined by backend based on referringAdminId
   };
 
   try {
-    const response = await fetchData<{ success: boolean; user: BackendPendingUser; message?: string, errors?: Record<string,string> }>('/pending-users', {
+    const response = await fetchData<{ success: boolean; user: BackendPendingUser; message?: string }>('/pending-users', {
       method: 'POST',
       body: JSON.stringify(newPendingUserData),
     });
 
     if (response && response.success && response.user) {
       setSuccessMessage("Pre-registration submitted successfully! Your account is pending administrator approval.");
-      // Reset form but keep referral info for display if they stay on page
-      setPreRegistrationForm(prev => ({
-          ...initialPreRegistrationFormState,
-          referringAdminId: prev.referringAdminId,
-          referringAdminDisplayName: prev.referringAdminDisplayName,
-          isReferralLinkValid: prev.isReferralLinkValid
-      }));
-
+      setPreRegistrationForm(prev => ({ ...initialPreRegistrationFormState, referringAdminId: prev.referringAdminId, referringAdminDisplayName: prev.referringAdminDisplayName, isReferralLinkValid: prev.isReferralLinkValid }));
 
       emailService.sendPreRegistrationSubmittedToUserEmail(response.user.email, response.user.displayName, preRegistrationForm.referringAdminDisplayName);
       // Backend should notify the specific referring admin
     } else {
-      let mainError = response?.message || "Failed to submit pre-registration.";
-      if(response?.errors){
-        const fieldErrors = Object.entries(response.errors).map(([field, msg]) => `${field}: ${msg}`).join('; ');
-        mainError = `${mainError} (${fieldErrors})`;
-      }
-      setError(mainError);
+      setError(response?.message || "Failed to submit pre-registration.");
     }
   } catch (err: any) {
     setError(err.message || "Failed to submit pre-registration. Please try again later.");
@@ -721,7 +584,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       setError("Email and password are required.");
       return;
     }
-     if (!/\S+@\S+\.\S+/.test(email.trim())) {
+     if (!/\S+@\S+\.\S+/.test(email)) {
       setError("Please enter a valid email address.");
       return;
     }
@@ -729,25 +592,26 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     try {
       const response = await fetchData<{ success: boolean; user: User; token: string; message?: string }>('/users/login', {
         method: 'POST',
-        body: JSON.stringify({ email: email.trim(), password: password }), // Trim email, do not trim password
+        body: JSON.stringify({ email, password }),
       });
 
       if (response && response.success && response.user && response.token && response.user.organizationId) {
         const loggedInUserWithTokenAndOrg: User = {
-          ...response.user,
+          ...response.user, 
           token: response.token
         };
-
+        
         setSuccessMessage(`Welcome back, ${loggedInUserWithTokenAndOrg.displayName}!`);
         setNewLoginForm({ email: '', password: '' });
 
         // loadInitialData will call setCurrentUser and handle localStorage for token
-        await loadInitialData(loggedInUserWithTokenAndOrg);
+        await loadInitialData(loggedInUserWithTokenAndOrg); 
 
         // Determine target page after data load completes and currentUser is fully set by loadInitialData.
+        // navigateTo might be called too early here if loadInitialData's effects on currentUser aren't immediate for this scope.
         // The hashChange useEffect is better suited to handle navigation post-login based on updated currentUser.
         const targetPage = loggedInUserWithTokenAndOrg.role === 'admin' ? Page.Dashboard : Page.ViewAssignments;
-        navigateTo(targetPage);
+        navigateTo(targetPage); // This might need to be after loadInitialData fully resolves and updates state.
 
         if (loggedInUserWithTokenAndOrg.role === 'user' && !localStorage.getItem(`hasCompletedUserTour_${loggedInUserWithTokenAndOrg.id}`)) {
           setShowUserTour(true);
@@ -765,20 +629,20 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     const token = localStorage.getItem(JWT_TOKEN_KEY);
     if (token) {
         try {
-          await fetchData('/users/logout', { method: 'POST' });
+          await fetchData('/users/logout', { method: 'POST' }); 
         } catch (err: any) {
           console.warn("Logout API call failed (user will be logged out client-side anyway):", err.message);
         }
     }
-    setCurrentUser(null);
+    setCurrentUser(null); 
     setUsers([]);
     setPendingUsers([]);
     setTasks([]);
     setPrograms([]);
     setAssignments([]);
     setAdminLogs([]);
-    _setCurrentPageInternal(Page.Login);
-    navigateTo(Page.Login);
+    _setCurrentPageInternal(Page.Login); 
+    navigateTo(Page.Login); 
     setSuccessMessage("You have been logged out successfully.");
   };
 
@@ -795,12 +659,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     }
 
     const updatePayload: Partial<User> & { password?: string } = {
-      uniqueId: uniqueId.trim(),
-      displayName: displayName.trim(),
-      position: position.trim(),
-      userInterests: userInterests?.trim(),
-      phone: phone?.trim(),
-      notificationPreference,
+      uniqueId, displayName, position, userInterests, phone, notificationPreference,
     };
 
     if (password) {
@@ -811,7 +670,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         if (!passwordValidationResult.isValid) {
             setError(passwordValidationResult.errors.join(" ")); return;
         }
-        updatePayload.password = password; // Do not trim password
+        updatePayload.password = password;
     }
 
     try {
@@ -824,11 +683,11 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         const updatedUserFromServer: User = {
             ...response.user,
             id: response.user.id || response.user._id!,
-            organizationId: currentUser.organizationId,
+            organizationId: currentUser.organizationId, 
             token: localStorage.getItem(JWT_TOKEN_KEY) || undefined
         };
         setUsers(users.map(u => u.id === currentUser.id ? updatedUserFromServer : u));
-        setCurrentUserInternal(updatedUserFromServer);
+        setCurrentUserInternal(updatedUserFromServer); 
         setSuccessMessage("Profile updated successfully!");
         setUserForm(prev => ({ ...prev, password: '', confirmPassword: '' }));
         if (currentUser.role === 'admin') {
@@ -852,26 +711,20 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     if (!email.trim() || !uniqueId.trim() || !displayName.trim() || !position.trim()) {
         setError("Email, System ID, Display Name, and Position are required."); return;
     }
-    if (!/\S+@\S+\.\S+/.test(email.trim())) {
+    if (!/\S+@\S+\.\S+/.test(email)) {
         setError("Please enter a valid email address for the user."); return;
     }
 
     const updatePayload: Partial<User> & { password?: string } = {
-      email: email.trim(),
-      uniqueId: uniqueId.trim(),
-      displayName: displayName.trim(),
-      position: position.trim(),
-      userInterests: userInterests?.trim(),
-      phone: phone?.trim(),
-      notificationPreference, role,
-      organizationId: currentUser.organizationId
+      email, uniqueId, displayName, position, userInterests, phone, notificationPreference, role,
+      organizationId: currentUser.organizationId 
     };
 
     if (password) {
         if (password !== confirmPassword) { setError("New passwords do not match."); return; }
         const passwordValidationResult = validatePassword(password);
         if (!passwordValidationResult.isValid) { setError(passwordValidationResult.errors.join(" ")); return; }
-        updatePayload.password = password; // Do not trim password
+        updatePayload.password = password;
     }
 
     try {
@@ -881,7 +734,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       });
 
       if (response && response.success && response.user) {
-        const baseUpdatedUser: User = {...response.user, id: response.user.id || response.user._id!, organizationId: currentUser.organizationId };
+        const baseUpdatedUser: User = { ...response.user, id: response.user.id || response.user._id!, organizationId: currentUser.organizationId };
         setUsers(users.map(u => u.id === editingUserId ? baseUpdatedUser : u));
         setSuccessMessage(`User ${baseUpdatedUser.displayName} updated successfully!`);
         setEditingUserId(null); setUserForm(initialUserFormData);
@@ -910,29 +763,23 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     if (!email.trim() || !uniqueId.trim() || !displayName.trim() || !position.trim() || !password.trim() || !confirmPassword.trim()) {
         setError("Email, System ID, Display Name, Position, Password, and Confirm Password are required."); return;
     }
-    if (!/\S+@\S+\.\S+/.test(email.trim())) { setError("Please enter a valid email address."); return; }
+    if (!/\S+@\S+\.\S+/.test(email)) { setError("Please enter a valid email address."); return; }
     if (password !== confirmPassword) { setError("Passwords do not match."); return; }
     const passVal = validatePassword(password);
     if (!passVal.isValid) { setError(passVal.errors.join(" ")); return; }
 
     const newUserData = {
-      email: email.trim(),
-      uniqueId: uniqueId.trim(),
-      password: password, // Do not trim
-      role: role,
-      displayName: displayName.trim(),
-      position: position.trim(),
-      userInterests: userInterests?.trim(),
-      phone: phone?.trim(),
-      notificationPreference,
-      referringAdminId: currentUser.id,
-      organizationId: currentUser.organizationId
+      email, uniqueId, password, 
+      role: role, 
+      displayName, position, userInterests, phone, notificationPreference,
+      referringAdminId: currentUser.id, 
+      organizationId: currentUser.organizationId 
     };
 
     try {
-      const response = await fetchData<{ success: boolean; user: BackendUser; message?: string, errors?: Record<string,string> }>('/users/register', {
+      const response = await fetchData<{ success: boolean; user: BackendUser; message?: string }>('/users/register', { 
         method: 'POST',
-        body: JSON.stringify(newUserData),
+        body: JSON.stringify(newUserData), 
       });
 
       if (response && response.success && response.user) {
@@ -944,12 +791,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         await addAdminLogEntry(`Admin created new user: ${createdUser.displayName}, Role: ${createdUser.role}.`);
         navigateTo(Page.UserManagement);
       } else {
-        let mainError = response?.message || "Failed to create user.";
-        if(response?.errors){
-          const fieldErrors = Object.entries(response.errors).map(([field, msg]) => `${field}: ${msg}`).join('; ');
-          mainError = `${mainError} (${fieldErrors})`;
-        }
-        setError(mainError);
+        setError(response?.message || "Failed to create user.");
       }
     } catch (err:any) {
       setError(err.message || "Failed to create user.");
@@ -968,13 +810,13 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     const roleToApprove = userForm.role || approvingPendingUser.role || 'user';
 
     const approvalData = {
-        position: userForm.position.trim() || 'Default Position',
-        userInterests: userForm.userInterests?.trim() || '',
-        phone: userForm.phone?.trim() || '',
+        position: userForm.position || 'Default Position',
+        userInterests: userForm.userInterests || '',
+        phone: userForm.phone || '',
         notificationPreference: userForm.notificationPreference || 'email',
         role: roleToApprove,
     };
-
+    
     try {
       const response = await fetchData<{ success: boolean; user: BackendUser; message?: string }>(`/pending-users/approve/${approvingPendingUser.id}`, {
         method: 'POST',
@@ -1021,7 +863,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
   const handleDeleteUser = async (userId: string) => {
     if (!currentUser || currentUser.role !== 'admin' || !currentUser.organizationId) return;
     if (currentUser.id === userId) { setError("Admins cannot delete their own accounts."); return; }
-
+    
     const userToDelete = users.find(u => u.id === userId);
     clearMessages();
     try {
@@ -1040,14 +882,14 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     }
   };
 
-  const handleGeneratePreRegistrationLink = async () => {
+  const handleGeneratePreRegistrationLink = () => {
     if (!currentUser || currentUser.role !== 'admin' || !currentUser.organizationId) {
       setError("Only admins can generate pre-registration links."); return;
     }
     const link = `${window.location.origin}${window.location.pathname}#${Page.PreRegistration}?refAdminId=${currentUser.id}`;
     setGeneratedLink(link);
     setSuccessMessage("Pre-registration link generated. Share it with the intended user.");
-    await addAdminLogEntry(`Admin ${currentUser.displayName} generated a pre-registration link.`);
+    addAdminLogEntry(`Admin ${currentUser.displayName} generated a pre-registration link.`);
   };
 
   const copyToClipboard = (text: string) => {
@@ -1063,7 +905,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); clearMessages();
     if (!currentUser || !currentUser.organizationId) { setError("Organization context missing."); return; }
     if (!programForm.name.trim() || !programForm.description.trim()) { setError("Program name and description are required."); return; }
-    const newProgramData: Omit<Program, 'id'> = { name: programForm.name.trim(), description: programForm.description.trim() };
+    const newProgramData: Omit<Program, 'id' | 'organizationId'> = { ...programForm };
     try {
       const createdProgram = await fetchData<Program>('/programs', { method: 'POST', body: JSON.stringify(newProgramData) });
       if (createdProgram && createdProgram.id) {
@@ -1093,8 +935,8 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); clearMessages();
     if (!currentUser || !currentUser.organizationId) { setError("Organization context missing."); return; }
     if (!taskForm.title.trim() || !taskForm.description.trim() || !taskForm.requiredSkills.trim()) { setError("Task title, description, and required skills are required."); return; }
-    const associatedProgram = programs.find(p => p.id === taskForm.programId);
-    const newTaskData: Partial<Omit<Task, 'id'>> = { ...taskForm, title: taskForm.title.trim(), description: taskForm.description.trim(), requiredSkills: taskForm.requiredSkills.trim(), deadline: taskForm.deadline ? new Date(taskForm.deadline).toISOString().split('T')[0] : undefined, programName: associatedProgram?.name };
+    const associatedProgram = programs.find(p => p.id === taskForm.programId); 
+    const newTaskData: Partial<Omit<Task, 'id' | 'organizationId'>> = { ...taskForm, deadline: taskForm.deadline ? new Date(taskForm.deadline).toISOString().split('T')[0] : undefined, programName: associatedProgram?.name };
     try {
       const createdTask = await fetchData<Task>('/tasks', { method: 'POST', body: JSON.stringify(newTaskData) });
       if (createdTask && createdTask.id) {
@@ -1113,888 +955,545 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
       const taskToDelete = tasks.find(t => t.id === taskId);
       await fetchData(`/tasks/${taskId}`, { method: 'DELETE' });
       setTasks(prev => prev.filter(t => t.id !== taskId));
-      const updatedAssignments = await fetchData<Assignment[]>('/assignments', {}, []);
-      setAssignments(updatedAssignments || []);
+      const updatedAssignments = await fetchData<Assignment[]>('/assignments', {}, []); setAssignments(updatedAssignments || []);
       setSuccessMessage(`Task "${taskToDelete?.title}" deleted.`);
       if(currentUser) await addAdminLogEntry(`Admin ${currentUser.displayName} deleted task: ${taskToDelete?.title}.`);
     } catch (err:any) { setError(err.message || "Failed to delete task."); }
   };
 
-  const handleAssignTask = async (e: React.FormEvent, taskId: string, personId: string) => {
-    e.preventDefault();
-    clearMessages();
-    if (!currentUser || currentUser.role !== 'admin' || !currentUser.organizationId) {
-      setError("Only admins can assign tasks.");
-      return;
-    }
-    if (!taskId || !personId) {
-      setError("Task and person must be selected for assignment.");
-      return;
-    }
-
-    const taskToAssign = tasks.find(t => t.id === taskId);
-    const personToAssign = users.find(u => u.id === personId);
-
-    if (!taskToAssign || !personToAssign) {
-      setError("Selected task or person not found.");
-      return;
-    }
-
-    const existingAssignmentForTask = assignments.find(a => a.taskId === taskId && a.personId === personId && a.organizationId === currentUser.organizationId);
-    if (existingAssignmentForTask) {
-        setError(`${personToAssign.displayName} is already assigned to task "${taskToAssign.title}".`);
-        return;
-    }
-
-    const newAssignmentData = {
-      taskId,
-      personId,
-      justification: assignmentSuggestion?.suggestedPersonName === personToAssign.displayName ? assignmentSuggestion.justification : 'Manual assignment',
-      deadline: assignmentForm.specificDeadline ? new Date(assignmentForm.specificDeadline).toISOString() : taskToAssign.deadline,
-      status: 'pending_acceptance' as AssignmentStatus,
-    };
-
+  const handleGetAssignmentSuggestion = async () => {
+    if (!selectedTaskForAssignment) { setError("Please select a task first."); return; }
+    const task = tasks.find(t => t.id === selectedTaskForAssignment); 
+    if (!task) { setError("Selected task not found."); return; }
+    const usersEligible = users.filter(u => u.role === 'user' && !assignments.some(a => a.taskId === task.id && a.personId === u.id && (a.status === 'pending_acceptance' || a.status === 'accepted_by_user')));
+    setIsLoadingSuggestion(true); setError(null); setAssignmentSuggestion(null);
     try {
-      const createdAssignment = await fetchData<Assignment>('/assignments', {
-        method: 'POST',
-        body: JSON.stringify(newAssignmentData),
-      });
+      const suggestion = await getAssignmentSuggestion(task, usersEligible, programs, assignments);
+      setAssignmentSuggestion(suggestion);
+      if(suggestion?.suggestedPersonName){ setInfoMessage(`AI Suggestion: ${suggestion.suggestedPersonName}. Justification: ${suggestion.justification}`); }
+      else if (suggestion?.justification) { setInfoMessage(`AI: ${suggestion.justification}`); }
+      else { setInfoMessage("AI could not provide a suggestion."); }
+      if(currentUser) await addAdminLogEntry(`Admin requested AI suggestion for task: ${task.title}.`);
+    } catch (err: any) { setError(`AI suggestion failed: ${err.message || "Unknown error"}`); }
+    finally { setIsLoadingSuggestion(false); }
+  };
 
+  const handleAssignTask = async (e: React.FormEvent, suggestedPersonDisplayName?: string | null) => {
+    e.preventDefault(); clearMessages();
+    if (!currentUser || !currentUser.organizationId) { setError("Organization context missing."); return; }
+    const personIdToAssign = (e.target as HTMLFormElement).assignPerson.value;
+    const specificDeadline = (e.target as HTMLFormElement).specificDeadline?.value;
+    if (!selectedTaskForAssignment || !personIdToAssign) { setError("Task and person must be selected."); return; }
+    const task = tasks.find(t => t.id === selectedTaskForAssignment); 
+    const person = users.find(u => u.id === personIdToAssign); 
+    if (!task || !person) { setError("Selected task or person not found in your organization."); return; }
+    if (assignments.some(a => a.taskId === task.id && a.personId === person.id && (a.status === 'pending_acceptance' || a.status === 'accepted_by_user'))) { setError(`${person.displayName} is already assigned this task or pending acceptance.`); return; }
+    const justification = suggestedPersonDisplayName === person.displayName && assignmentSuggestion?.justification ? assignmentSuggestion.justification : 'Manually assigned by admin.';
+    const newAssignmentData: Partial<Omit<Assignment, 'organizationId'>> = { taskId: task.id, personId: person.id, taskTitle: task.title, personName: person.displayName, justification, status: 'pending_acceptance', deadline: specificDeadline || task.deadline, };
+    try {
+      const createdAssignment = await fetchData<Assignment>('/assignments', { method: 'POST', body: JSON.stringify(newAssignmentData) });
       if (createdAssignment && createdAssignment.taskId) {
         setAssignments(prev => [...prev, createdAssignment]);
-        setSuccessMessage(`Task "${taskToAssign.title}" assigned to ${personToAssign.displayName}.`);
-        setSelectedTaskForAssignment(null);
-        setAssignmentSuggestion(null);
-        setAssignmentForm({ specificDeadline: ''});
-        await addAdminLogEntry(`Admin ${currentUser.displayName} assigned task "${taskToAssign.title}" to ${personToAssign.displayName}.`);
-      } else {
-        setError("Failed to assign task. API did not return a valid assignment.");
-      }
-    } catch (err: any) {
-      setError(err.message || "Failed to assign task.");
-    }
+        setSuccessMessage(`Task "${task.title}" assigned to ${person.displayName}.`);
+        setSelectedTaskForAssignment(null); setAssignmentSuggestion(null); setAssignmentForm({ specificDeadline: '' });
+        if (person.notificationPreference === 'email' && person.email) { emailService.sendTaskProposalEmail(person.email, person.displayName, task.title, currentUser?.displayName || "Admin", createdAssignment.deadline); }
+        if(currentUser) await addAdminLogEntry(`Admin assigned task "${task.title}" to ${person.displayName}.`);
+      } else { setError("Failed to assign task."); }
+    } catch (err:any) { setError(err.message || "Failed to assign task."); }
   };
 
-
-  const handleUpdateAssignmentStatus = async (taskId: string, personId: string, status: AssignmentStatus, userDelayReason?: string) => {
+  const updateAssignmentStatus = async (taskId: string, personId: string, newStatus: AssignmentStatus, additionalData: Record<string, any> = {}) => {
+    if (!currentUser && newStatus !== 'pending_acceptance') return null; 
+    if (!currentUser || !currentUser.organizationId) { setError("Organization context missing."); return null;}
     clearMessages();
-    if (!currentUser || !currentUser.organizationId) {
-      setError("User context or organization ID missing.");
-      return;
-    }
-
-    const assignmentToUpdate = assignments.find(a => a.taskId === taskId && a.personId === personId && a.organizationId === currentUser.organizationId);
-    if (!assignmentToUpdate) {
-      setError("Assignment not found.");
-      return;
-    }
-
-    let payload: any = { taskId, personId, status };
-    if (status === 'submitted_on_time' || status === 'submitted_late') {
-      payload.userSubmissionDate = new Date().toISOString();
-      if (status === 'submitted_late' && userDelayReason) {
-        payload.userDelayReason = userDelayReason;
-      }
-    }
-
+    const payload = { taskId, personId, status: newStatus, ...additionalData };
     try {
-      const updatedAssignment = await fetchData<Assignment>('/assignments', { 
-        method: 'PATCH', 
-        body: JSON.stringify(payload),
-      });
-
+      const updatedAssignment = await fetchData<Assignment>(`/assignments`, { method: 'PATCH', body: JSON.stringify(payload) });
       if (updatedAssignment && updatedAssignment.taskId) {
-        setAssignments(prev => prev.map(a => a.taskId === taskId && a.personId === personId ? updatedAssignment : a));
-        setSuccessMessage(`Assignment "${updatedAssignment.taskTitle}" status updated to ${status.replace(/_/g, ' ')}.`);
-
-        const taskTitle = updatedAssignment.taskTitle;
-        const assignedUser = users.find(u => u.id === personId);
-
-        if (currentUser.role === 'admin' && status === 'completed_admin_approved' && assignedUser) {
-           await addAdminLogEntry(`Admin ${currentUser.displayName} approved task completion for "${taskTitle}" by ${assignedUser.displayName}.`);
-        } else if (currentUser.role === 'user' && assignedUser) {
-           await addAdminLogEntry(`User ${currentUser.displayName} updated status of task "${taskTitle}" to ${status.replace(/_/g, ' ')}.`);
-        }
-
-        setAssignmentToSubmitDelayReason(null); 
-        setUserSubmissionDelayReason('');
-
-      } else {
-        setError("Failed to update assignment status. API response was invalid.");
-      }
-    } catch (err: any) {
-      setError(err.message || "Failed to update assignment status.");
-    }
+        setAssignments(prev => prev.map(a => (a.taskId === taskId && a.personId === personId) ? updatedAssignment : a));
+        return updatedAssignment;
+      } else { setError(`Failed to update task status. Server did not confirm.`); return null; }
+    } catch (err:any) { setError(err.message || `Failed to update task status.`); throw err; }
   };
 
 
-  const handleFetchAssignmentSuggestion = async (taskId: string) => {
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) {
-      setError("Task not found for suggestion.");
-      return;
-    }
-    setIsLoadingSuggestion(true);
-    setAssignmentSuggestion(null);
-    setError(null);
+  const handleUserAcceptTask = async (taskId: string) => {
+    if (!currentUser) return;
+    try {
+        const updatedAssignment = await updateAssignmentStatus(taskId, currentUser.id, 'accepted_by_user');
+        if (updatedAssignment) {
+            setSuccessMessage(`Task "${updatedAssignment.taskTitle}" accepted.`);
+            const admin = getAdminToNotify(users.find(u=>u.id === currentUser.referringAdminId)?.id); 
+            if (admin?.notificationPreference === 'email' && admin.email) { emailService.sendTaskStatusUpdateToAdminEmail(admin.email, admin.displayName, currentUser.displayName, updatedAssignment.taskTitle, "accepted"); }
+        }
+    } catch (e) { /* error set by updateAssignmentStatus */ }
+  };
 
-    const suggestion = await getAssignmentSuggestion(task, users, programs, assignments);
-    setAssignmentSuggestion(suggestion);
-    setIsLoadingSuggestion(false);
-    if (!suggestion?.suggestedPersonName) {
-      setInfoMessage(suggestion?.justification || "AI could not suggest a suitable person, or no one is available.");
-    } else {
-      setInfoMessage(`AI Suggestion: ${suggestion.suggestedPersonName}. Justification: ${suggestion.justification}`);
+  const handleUserDeclineTask = async (taskId: string) => {
+    if (!currentUser) return;
+     try {
+        const updatedAssignment = await updateAssignmentStatus(taskId, currentUser.id, 'declined_by_user');
+         if (updatedAssignment) {
+            setSuccessMessage(`Task "${updatedAssignment.taskTitle}" declined.`);
+            const admin = getAdminToNotify(users.find(u=>u.id === currentUser.referringAdminId)?.id);
+            if (admin?.notificationPreference === 'email' && admin.email) { emailService.sendTaskStatusUpdateToAdminEmail(admin.email, admin.displayName, currentUser.displayName, updatedAssignment.taskTitle, "declined"); }
+        }
+    } catch (e) { /* error set */ }
+  };
+
+  const handleUserSubmitTask = async (taskId: string, delayReason?: string) => {
+    if (!currentUser) return;
+    const assignment = assignments.find(a => a.taskId === taskId && a.personId === currentUser.id && a.status === 'accepted_by_user');
+    if (!assignment) { setError("Task not found or not accepted."); return; }
+    const submissionDate = new Date();
+    let newStatus: AssignmentStatus = 'submitted_on_time';
+    if (assignment.deadline && submissionDate > new Date(assignment.deadline)) {
+      newStatus = 'submitted_late';
+      if (!delayReason && assignmentToSubmitDelayReason === `${assignment.taskId}-${assignment.personId}`) { setError("Reason required for late submission."); return; }
+    }
+    const additionalData: any = { userSubmissionDate: submissionDate.toISOString() };
+    if (newStatus === 'submitted_late') additionalData.userDelayReason = delayReason || userSubmissionDelayReason;
+    try {
+        const updated = await updateAssignmentStatus(taskId, currentUser.id, newStatus, additionalData);
+        if (updated) {
+            setSuccessMessage(`Task "${updated.taskTitle}" submitted.`);
+            setUserSubmissionDelayReason(''); setAssignmentToSubmitDelayReason(null);
+            const admin = getAdminToNotify(users.find(u=>u.id === currentUser.referringAdminId)?.id);
+            if (admin?.notificationPreference === 'email' && admin.email) { emailService.sendTaskStatusUpdateToAdminEmail(admin.email, admin.displayName, currentUser.displayName, updated.taskTitle, `submitted (${newStatus.replace(/_/g, ' ')})`); }
+        }
+    } catch (e) { /* error set */ }
+  };
+
+  const handleAdminApproveTaskCompletion = async (taskId: string, personId: string) => {
+    if (!currentUser || currentUser.role !== 'admin') return;
+     try {
+        const updated = await updateAssignmentStatus(taskId, personId, 'completed_admin_approved');
+        if (updated) {
+            const user = users.find(u => u.id === personId); 
+            setSuccessMessage(`Completion of task "${updated.taskTitle}" by ${user?.displayName || 'user'} approved.`);
+            if (user?.notificationPreference === 'email' && user.email) { emailService.sendTaskCompletionApprovedToUserEmail(user.email, user.displayName, updated.taskTitle, currentUser.displayName); }
+            await addAdminLogEntry(`Admin approved task completion for "${updated.taskTitle}" by ${user?.displayName}.`);
+        }
+    } catch (e) { /* error set */ }
+  };
+
+  const addAdminLogEntry = async (logText: string, imagePreviewUrl?: string) => {
+    if (!currentUser || currentUser.role !== 'admin' || !currentUser.organizationId) return;
+    const newLogData: Omit<AdminLogEntry, 'id' | 'organizationId'> = { adminId: currentUser.id, adminDisplayName: currentUser.displayName, timestamp: new Date().toISOString(), logText, imagePreviewUrl };
+    try {
+        const createdLog = await fetchData<AdminLogEntry>('/admin-logs', { method: 'POST', body: JSON.stringify(newLogData) });
+        if (createdLog?.id) setAdminLogs(prev => [createdLog, ...prev]);
+        else console.error("Failed to save admin log to backend.");
+    } catch (error: any) { console.error("Failed to save admin log:", error); }
+  };
+
+  const handleAdminLogSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminLogText.trim() && !adminLogImageFile) { setError("Log text or an image is required."); return; }
+    setIsSubmittingLog(true); clearMessages();
+    let imagePreviewUrl: string | undefined = undefined;
+    if (adminLogImageFile) {
+        try {
+            imagePreviewUrl = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.onerror = reject;
+                reader.readAsDataURL(adminLogImageFile);
+            });
+        } catch (error) { setError("Failed to process image file."); setIsSubmittingLog(false); return; }
+    }
+    try {
+        await addAdminLogEntry(adminLogText || `Image log by ${currentUser?.displayName}`, imagePreviewUrl);
+        setSuccessMessage("Admin log entry added.");
+        setAdminLogText(''); setAdminLogImageFile(null);
+        const fileInput = document.getElementById('adminLogImage') as HTMLInputElement; if (fileInput) fileInput.value = '';
+    } catch (err: any) { setError("Failed to submit admin log: " + err.message); }
+    finally { setIsSubmittingLog(false); }
+  };
+
+
+  const handleForgotPassword = async () => {
+    clearMessages();
+    const emailToReset = newLoginForm.email;
+    if (!emailToReset || !/\S+@\S+\.\S+/.test(emailToReset)) { setError("Please enter a valid email address."); return; }
+    try {
+        await fetchData('/users/forgot-password', { method: 'POST', body: JSON.stringify({ email: emailToReset }) });
+        setInfoMessage(`If an account exists for ${emailToReset}, a password reset link has been sent.`);
+    } catch (err: any) {
+        console.error("Forgot password API call failed:", err);
+        setInfoMessage(`If an account exists for ${emailToReset}, instructions will be sent. (Error: ${err.message})`);
     }
   };
 
   const handleCompleteUserTour = (completed: boolean) => {
     setShowUserTour(false);
     if (currentUser) {
-      localStorage.setItem(`hasCompletedUserTour_${currentUser.id}`, 'true');
-      if (completed) {
-        setSuccessMessage("Tour completed! We hope you find the app easy to use.");
-      } else {
-        setInfoMessage("Tour skipped. You can always refer to help sections or ask an admin if you have questions.");
-      }
+        localStorage.setItem(`hasCompletedUserTour_${currentUser.id}`, 'true');
+        if (completed) setSuccessMessage("Great! You've completed the tour.");
+        else setInfoMessage("Tour skipped.");
     }
   };
 
 
-  const handleAddAdminLogWithImage = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!currentUser || currentUser.role !== 'admin' || (!adminLogText.trim() && !adminLogImageFile)) {
-            setError("Admin log text or an image is required.");
-            return;
-        }
-        setIsSubmittingLog(true);
-        clearMessages();
-
-        let imageUrl: string | undefined = undefined;
-        if (adminLogImageFile) {
-            console.warn("Image upload simulation: In a real app, upload image and get URL here.");
-            imageUrl = `https://via.placeholder.com/150/0000FF/808080?Text=Preview+${adminLogImageFile.name.substring(0,10)}`; // Placeholder
-        }
-
-        try {
-            await addAdminLogEntry(adminLogText.trim() || `Image: ${adminLogImageFile?.name || 'N/A'}`, imageUrl);
-            setSuccessMessage("Admin log entry added.");
-            setAdminLogText('');
-            setAdminLogImageFile(null);
-        } catch (error: any) {
-            setError("Failed to add admin log: " + error.message);
-        } finally {
-            setIsSubmittingLog(false);
-        }
-    };
-
-    const refreshAdminDashboardData = useCallback(async () => {
-        if (!currentUser || currentUser.role !== 'admin') {
-          setInfoMessage("Only admins can refresh dashboard data.");
-          return;
-        }
-        clearMessages();
-        setIsRefreshingDashboard(true);
-        try {
-          const [loadedUsers, loadedPendingUsers, loadedAdminLogsRefresh] = await Promise.all([
-            fetchData<User[]>('/users', {}, []),
-            fetchData<PendingUser[]>('/pending-users', {}, []),
-            fetchData<AdminLogEntry[]>('/admin-logs', {}, [])
-          ]);
-
-          if (loadedUsers) setUsers(loadedUsers);
-          if (loadedPendingUsers) setPendingUsers(loadedPendingUsers);
-          
-          if (loadedAdminLogsRefresh) {
-            setAdminLogs(loadedAdminLogsRefresh);
-            console.log('[App.tsx] Refreshed Admin Logs:', loadedAdminLogsRefresh);
-          } else {
-            setAdminLogs([]); 
-            console.log('[App.tsx] Refreshed Admin Logs: No logs returned or fetch failed, set to empty.');
-          }
-          setSuccessMessage("Dashboard data refreshed.");
-        } catch (err: any) {
-          console.error("Error refreshing dashboard data:", err);
-          setError("Failed to refresh dashboard data: " + err.message);
-        } finally {
-          setIsRefreshingDashboard(false);
-        }
-      }, [currentUser, clearMessages]);
-
-
-  if (isLoadingAppData) {
-    return <div className="flex items-center justify-center min-h-screen bg-background"><LoadingSpinner /></div>;
+  if (isLoadingAppData && !localStorage.getItem(JWT_TOKEN_KEY)) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-bground p-4">
+        <LoadingSpinner />
+        <p className="mt-4 text-textlight">Loading application...</p>
+        {error && <div className="mt-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-md shadow-lg max-w-md w-full" role="alert"><p><strong className="font-bold">Error:</strong> {error}</p></div>}
+      </div>
+    );
   }
 
-  if (currentPage === Page.PreRegistration) {
-    return (
-      <PreRegistrationFormPage
-        formState={preRegistrationForm}
-        setFormState={setPreRegistrationForm}
-        onSubmit={handlePreRegistrationSubmit}
-        error={error}
-        successMessage={successMessage}
-        infoMessage={infoMessage}
-        clearMessages={clearMessages}
-        navigateToLogin={() => navigateTo(Page.Login)}
-      />
+  const UIMessages: React.FC = () => (
+    <>
+      {error && <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-md shadow-lg w-full" role="alert"><p><strong className="font-bold">Error:</strong> {error}</p><button onClick={clearMessages} className="ml-2 text-sm font-bold">X</button></div>}
+      {successMessage && <div className="mb-4 p-3 bg-green-100 border-green-400 text-green-700 rounded-md shadow-lg w-full" role="alert"><p>{successMessage}</p><button onClick={clearMessages} className="ml-2 text-sm font-bold">X</button></div>}
+      {infoMessage && <div className="mb-4 p-3 bg-blue-100 border-blue-400 text-blue-700 rounded-md shadow-lg w-full" role="status"><p>{infoMessage}</p><button onClick={clearMessages} className="ml-2 text-sm font-bold">X</button></div>}
+    </>
+  );
+
+  if (isLoadingAppData && !currentUser && localStorage.getItem(JWT_TOKEN_KEY)) { 
+     return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-bground p-4">
+        <LoadingSpinner />
+        <p className="mt-4 text-textlight">Authenticating...</p>
+      </div>
     );
   }
 
 
-  if (!currentUser) {
-    const AuthViewComponent = () => (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-authPageBg p-4">
+  if (!currentUser || currentPage === Page.Login || currentPage === Page.PreRegistration) {
+    if (currentPage === Page.PreRegistration) {
+      return (
+        <PreRegistrationFormPage
+          formState={preRegistrationForm}
+          setFormState={setPreRegistrationForm}
+          onSubmit={handlePreRegistrationSubmit}
+          error={error}
+          successMessage={successMessage}
+          infoMessage={infoMessage}
+          clearMessages={clearMessages}
+          navigateToLogin={() => navigateTo(Page.Login)}
+        />
+      );
+    }
+
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-authPageBg p-4 main-app-scope">
+        {isLoadingAppData && localStorage.getItem(JWT_TOKEN_KEY) && <div className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-50 flex items-center justify-center z-50"><LoadingSpinner /><p className="text-white ml-2">Loading...</p></div>}
         <div className="bg-surface p-8 rounded-xl shadow-2xl w-full max-w-md">
-           {error && <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-md shadow-lg" role="alert"><p><strong className="font-bold">Error:</strong> {error}</p><button onClick={clearMessages} className="ml-2 text-sm font-bold">X</button></div>}
-          {successMessage && <div className="mb-4 p-3 bg-green-100 border border-green-400 text-green-700 rounded-md shadow-lg" role="alert"><p>{successMessage}</p><button onClick={clearMessages} className="ml-2 text-sm font-bold">X</button></div>}
-          {infoMessage && <div className="mb-4 p-3 bg-blue-100 border border-blue-400 text-blue-700 rounded-md shadow-lg" role="status"><p>{infoMessage}</p><button onClick={clearMessages} className="ml-2 text-sm font-bold">X</button></div>}
+          <UIMessages />
+          <h2 className="text-3xl font-bold text-textlight mb-6 text-center">
+            Task Assignment Assistant
+          </h2>
 
           {authView === 'login' ? (
-            <>
-              <h2 className="text-3xl font-bold text-textlight mb-6 text-center">Login</h2>
-              <form onSubmit={handleLogin} className="space-y-5">
-                <div>
-                  <label htmlFor="loginEmail" className="block text-sm font-medium text-textlight">Email Address</label>
-                  <AuthFormInput id="loginEmail" aria-label="Login Email" type="email" value={newLoginForm.email} onChange={(e) => setNewLoginForm({ ...newLoginForm, email: e.target.value })} required placeholder="you@example.com" />
-                </div>
-                <div>
-                  <label htmlFor="loginPassword" className="block text-sm font-medium text-textlight">Password</label>
-                  <AuthFormInput id="loginPassword" aria-label="Login Password" type="password" value={newLoginForm.password} onChange={(e) => setNewLoginForm({ ...newLoginForm, password: e.target.value })} required placeholder="Enter your password" />
-                </div>
-                <button type="submit" className="w-full py-3 px-4 bg-authButton hover:bg-authButtonHover text-textlight font-semibold rounded-md shadow-sm transition-colors text-sm">Sign In</button>
-              </form>
-              <p className="text-center text-sm text-textlight mt-6">
-                Need an account?{' '}
-                <button type="button" onClick={() => { setAuthView('register'); clearMessages(); }} className="font-medium text-authLink hover:underline">Register here</button>
-                 <span className="mx-1 text-neutral">|</span>
-                <button type="button" onClick={() => navigateTo(Page.PreRegistration)} className="font-medium text-authLink hover:underline">Invited? Pre-register</button>
-              </p>
-            </>
-          ) : ( 
-            <>
-              <h2 className="text-3xl font-bold text-textlight mb-6 text-center">Create Account</h2>
-              <form onSubmit={handleNewRegistration} className="space-y-4">
-                <div>
-                  <label htmlFor="regName" className="block text-sm font-medium text-textlight">Full Name</label>
-                  <AuthFormInput id="regName" aria-label="Registration Full Name" type="text" value={newRegistrationForm.name} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, name: e.target.value })} required placeholder="Jane Doe"/>
-                </div>
-                <div>
-                  <label htmlFor="regEmail" className="block text-sm font-medium text-textlight">Email Address</label>
-                  <AuthFormInput id="regEmail" aria-label="Registration Email" type="email" value={newRegistrationForm.email} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, email: e.target.value })} required placeholder="you@example.com" />
-                </div>
-                 <div>
-                  <label htmlFor="regUniqueId" className="block text-sm font-medium text-textlight">System ID / Username</label>
-                  <AuthFormInput id="regUniqueId" aria-label="Registration System ID" type="text" value={newRegistrationForm.uniqueId} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, uniqueId: e.target.value })} required placeholder="e.g., jdoe23" />
-                </div>
-                <div>
-                  <label htmlFor="regPassword" className="block text-sm font-medium text-textlight">Password</label>
-                  <AuthFormInput id="regPassword" aria-label="Registration Password" type="password" value={newRegistrationForm.password} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, password: e.target.value })} required placeholder="Create a password" aria-describedby="passwordHelpRegister" />
-                   <p id="passwordHelpRegister" className="mt-1 text-xs text-neutral">{passwordRequirementsText}</p>
-                </div>
-                <div>
-                  <label htmlFor="regConfirmPassword" className="block text-sm font-medium text-textlight">Confirm Password</label>
-                  <AuthFormInput id="regConfirmPassword" aria-label="Registration Confirm Password" type="password" value={newRegistrationForm.confirmPassword} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, confirmPassword: e.target.value })} required placeholder="Confirm your password" />
-                </div>
-                <div>
-                    <label htmlFor="regRole" className="block text-sm font-medium text-textlight">Registering as</label>
-                    <AuthFormSelect id="regRole" aria-label="Registration Role" value={newRegistrationForm.role} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, role: e.target.value as Role })}>
-                        <option value="user">User (General)</option>
-                        <option value="admin">Administrator (New Site/Company)</option>
-                    </AuthFormSelect>
-                </div>
-                {newRegistrationForm.role === 'admin' && (
-                    <div>
-                        <label htmlFor="regCompanyName" className="block text-sm font-medium text-textlight">Company Name</label>
-                        <AuthFormInput id="regCompanyName" aria-label="Registration Company Name" type="text" value={newRegistrationForm.companyName} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, companyName: e.target.value })} required={newRegistrationForm.role === 'admin'} placeholder="Your Company LLC" />
-                    </div>
-                )}
-                {newRegistrationForm.role === 'user' && (
-                     <div>
-                        <label htmlFor="regPosition" className="block text-sm font-medium text-textlight">Your Position/Role (Optional)</label>
-                        <AuthFormInput id="regPosition" aria-label="Registration Position" type="text" value={newRegistrationForm.position} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, position: e.target.value })} placeholder="e.g., Software Engineer, Volunteer Coordinator" />
-                    </div>
-                )}
-                <button type="submit" className="w-full py-3 px-4 bg-authButton hover:bg-authButtonHover text-textlight font-semibold rounded-md shadow-sm transition-colors text-sm">Register</button>
-              </form>
-              <p className="text-center text-sm text-textlight mt-6">
-                Already have an account?{' '}
-                <button type="button" onClick={() => { setAuthView('login'); clearMessages(); }} className="font-medium text-authLink hover:underline">Sign in</button>
-              </p>
-            </>
+            <form onSubmit={handleLogin} className="space-y-5">
+              <h3 className="text-xl font-semibold text-textlight mb-4">Login</h3>
+              <div>
+                <label htmlFor="loginEmail" className="block text-sm font-medium text-textlight">Email Address</label>
+                <AuthFormInput type="email" id="loginEmail" aria-label="Email for login" placeholder="you@example.com" value={newLoginForm.email} onChange={(e) => setNewLoginForm({ ...newLoginForm, email: e.target.value })} required autoComplete="email" />
+              </div>
+              <div>
+                <label htmlFor="loginPassword" className="block text-sm font-medium text-textlight">Password</label>
+                <AuthFormInput type="password" id="loginPassword" aria-label="Password for login" placeholder="Enter your password" value={newLoginForm.password} onChange={(e) => setNewLoginForm({ ...newLoginForm, password: e.target.value })} required autoComplete="current-password" />
+              </div>
+              <button type="submit" className="w-full py-3 px-4 bg-authButton hover:bg-authButtonHover text-textlight font-semibold rounded-md shadow-sm transition-colors text-sm" disabled={isLoadingAppData && !!localStorage.getItem(JWT_TOKEN_KEY)}>
+                {(isLoadingAppData && !!localStorage.getItem(JWT_TOKEN_KEY)) ? <LoadingSpinner /> : 'Sign In'}
+              </button>
+              <div className="text-sm text-center"> <button type="button" onClick={handleForgotPassword} className="font-medium text-authLink hover:underline"> Forgot password? </button> </div>
+            </form>
+          ) : (
+            <form onSubmit={handleNewRegistration} className="space-y-5">
+              <h3 className="text-xl font-semibold text-textlight mb-4">Register New Account</h3>
+              <div> <label htmlFor="regName" className="block text-sm font-medium text-textlight">Full Name</label> <AuthFormInput type="text" id="regName" aria-label="Full name for registration" placeholder="Your Full Name" value={newRegistrationForm.name} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, name: e.target.value })} required autoComplete="name" /> </div>
+              <div> <label htmlFor="regEmail" className="block text-sm font-medium text-textlight">Email Address</label> <AuthFormInput type="email" id="regEmail" aria-label="Email for registration" placeholder="you@example.com" value={newRegistrationForm.email} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, email: e.target.value })} required autoComplete="email" /> </div>
+              <div> <label htmlFor="regUniqueId" className="block text-sm font-medium text-textlight">System ID / Username</label> <AuthFormInput type="text" id="regUniqueId" aria-label="System ID for registration" placeholder="Create a unique ID" value={newRegistrationForm.uniqueId} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, uniqueId: e.target.value })} required /> </div>
+              <div> <label htmlFor="regPassword" className="block text-sm font-medium text-textlight">Password</label> <AuthFormInput type="password" id="regPassword" aria-label="Password for registration" placeholder="Create a password" value={newRegistrationForm.password} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, password: e.target.value })} required autoComplete="new-password" aria-describedby="passwordHelpReg"/> <p id="passwordHelpReg" className="mt-1 text-xs text-neutral">{passwordRequirementsText}</p> </div>
+              <div> <label htmlFor="regConfirmPassword" className="block text-sm font-medium text-textlight">Confirm Password</label> <AuthFormInput type="password" id="regConfirmPassword" aria-label="Confirm password for registration" placeholder="Confirm your password" value={newRegistrationForm.confirmPassword} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, confirmPassword: e.target.value })} required autoComplete="new-password" /> </div>
+              
+              <div>
+                <label htmlFor="regRole" className="block text-sm font-medium text-textlight">Register as</label>
+                <AuthFormSelect id="regRole" aria-label="Select role for registration" value={newRegistrationForm.role} onChange={(e) => setNewRegistrationForm({...newRegistrationForm, role: e.target.value as Role})}>
+                  <option value="user">User (requires referral/invitation)</option>
+                  <option value="admin">Administrator (creates a new site)</option>
+                </AuthFormSelect>
+              </div>
+              {newRegistrationForm.role === 'admin' && (
+                <div> <label htmlFor="regOrgName" className="block text-sm font-medium text-textlight">Organization/Site Name</label> <AuthFormInput type="text" id="regOrgName" aria-label="Organization or Site Name" placeholder="Your Organization Name" value={newRegistrationForm.organizationName} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, organizationName: e.target.value })} required /> <small className="text-xs text-gray-500">This will be the name of your new, separate site.</small> </div>
+              )}
+               <small className="text-xs text-gray-500">
+                  {newRegistrationForm.role === 'admin' ? "Registering as an Administrator creates a new, isolated site." : 
+                   "User accounts are typically created via pre-registration links from an existing site administrator."}
+                </small>
+
+
+              <button type="submit" className="w-full py-3 px-4 bg-authButton hover:bg-authButtonHover text-textlight font-semibold rounded-md shadow-sm transition-colors text-sm" disabled={isLoadingAppData && !!localStorage.getItem(JWT_TOKEN_KEY)}>
+                {(isLoadingAppData && !!localStorage.getItem(JWT_TOKEN_KEY)) ? <LoadingSpinner/> : 'Register'}
+              </button>
+            </form>
           )}
+          <p className="text-center text-sm text-textlight mt-6">
+            {authView === 'login' ? "Don't have an account?" : "Already have an account?"}{' '}
+            <button type="button" onClick={() => { clearMessages(); setAuthView(authView === 'login' ? 'register' : 'login'); }} className="font-medium text-authLink hover:underline">
+              {authView === 'login' ? 'Register here' : 'Sign in here'}
+            </button>
+          </p>
         </div>
-         <footer className="text-center py-6 text-sm text-neutral mt-auto">
-          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by AI.</p>
+        <footer className="text-center py-6 text-sm text-neutral mt-auto">
+          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by SHAIK MOAHAMMED NAWAZ.</p>
         </footer>
       </div>
     );
-    return <AuthViewComponent />;
   }
 
+
   return (
-    <div className="flex h-screen bg-background">
-      <TopNavbar currentUser={currentUser} currentPage={currentPage} navigateTo={navigateTo} handleLogout={handleLogout} />
-      <main className="flex-1 p-6 overflow-y-auto mt-16 main-app-scope"> 
-        {error && <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded-md shadow-lg" role="alert"><p><strong className="font-bold">Error:</strong> {error}</p><button onClick={clearMessages} className="ml-4 text-sm font-bold text-red-800 hover:text-red-900">Dismiss</button></div>}
-        {successMessage && <div className="mb-4 p-4 bg-green-100 border border-green-400 text-green-700 rounded-md shadow-lg" role="alert"><p>{successMessage}</p><button onClick={clearMessages} className="ml-4 text-sm font-bold text-green-800 hover:text-green-900">Dismiss</button></div>}
-        {infoMessage && <div className="mb-4 p-4 bg-blue-100 border border-blue-400 text-blue-700 rounded-md shadow-lg" role="status"><p>{infoMessage}</p><button onClick={clearMessages} className="ml-4 text-sm font-bold text-blue-800 hover:text-blue-900">Dismiss</button></div>}
+    <div className="flex flex-col h-screen bg-bground main-app-scope">
+       {isLoadingAppData && <div className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-70 flex items-center justify-center z-[100]"><LoadingSpinner /><p className="text-white ml-3 text-lg">Loading data...</p></div>}
+       {showUserTour && currentUser && <UserTour user={currentUser} onClose={handleCompleteUserTour} />}
+      
+      <TopNavbar
+        currentUser={currentUser}
+        currentPage={currentPage}
+        navigateTo={navigateTo}
+        handleLogout={handleLogout}
+      />
+
+      <main className="flex-1 p-6 overflow-y-auto"> {/* Removed `main-app-scope` from here as it's on the root */}
+        <UIMessages />
 
         {currentPage === Page.Dashboard && currentUser.role === 'admin' && (
           <div className="space-y-6">
-            <div className="flex justify-between items-center">
-                <h2 className="text-3xl font-semibold text-primary mb-6">Admin Dashboard</h2>
-                <button
-                    onClick={refreshAdminDashboardData}
-                    className="btn-secondary text-sm px-4 py-2"
-                    disabled={isRefreshingDashboard}
-                    aria-label="Refresh dashboard data"
-                >
-                    {isRefreshingDashboard ? <LoadingSpinner/> : 'Refresh Data'}
-                </button>
-            </div>
+            <h2 className="text-3xl font-semibold text-primary mb-6">Admin Dashboard</h2>
+             <p className="text-md text-neutral">Organization ID: {currentUser.organizationId}</p>
+
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              <div className="bg-surface p-6 rounded-lg shadow-lg">
-                <h3 className="text-xl font-medium text-textlight mb-2">Users</h3>
-                <p className="text-3xl font-bold text-primary">{users.length}</p>
-                <p className="text-sm text-neutral">Total registered users</p>
-              </div>
-              <div className="bg-surface p-6 rounded-lg shadow-lg">
-                <h3 className="text-xl font-medium text-textlight mb-2">Pending Approvals</h3>
-                <p className="text-3xl font-bold text-primary">{pendingUsers.length}</p>
-                <p className="text-sm text-neutral">Users awaiting approval</p>
-              </div>
-              <div className="bg-surface p-6 rounded-lg shadow-lg">
-                <h3 className="text-xl font-medium text-textlight mb-2">Tasks</h3>
-                <p className="text-3xl font-bold text-primary">{tasks.length}</p>
-                <p className="text-sm text-neutral">Total available tasks</p>
-              </div>
-              <div className="bg-surface p-6 rounded-lg shadow-lg">
-                <h3 className="text-xl font-medium text-textlight mb-2">Programs</h3>
-                <p className="text-3xl font-bold text-primary">{programs.length}</p>
-                <p className="text-sm text-neutral">Managed programs</p>
-              </div>
-               <div className="bg-surface p-6 rounded-lg shadow-lg">
-                <h3 className="text-xl font-medium text-textlight mb-2">Active Assignments</h3>
-                <p className="text-3xl font-bold text-primary">{assignments.filter(a => ['pending_acceptance', 'accepted_by_user'].includes(a.status)).length}</p>
-                <p className="text-sm text-neutral">Tasks currently in progress or awaiting acceptance</p>
-              </div>
+                <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Users</h3> <p className="text-3xl font-bold text-textlight">{users.length}</p> <p className="text-sm text-neutral">Total active users in your organization</p> </div>
+                <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Pending Approvals</h3> <p className="text-3xl font-bold text-textlight">{pendingUsers.length}</p> <p className="text-sm text-neutral">Users awaiting approval in your organization</p> </div>
+                <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Tasks</h3> <p className="text-3xl font-bold text-textlight">{tasks.length}</p> <p className="text-sm text-neutral">Total defined tasks in your organization</p> </div>
+                <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Programs</h3> <p className="text-3xl font-bold text-textlight">{programs.length}</p> <p className="text-sm text-neutral">Total programs in your organization</p> </div>
+                 <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Active Assignments</h3> <p className="text-3xl font-bold text-textlight">{assignments.filter(a => a.status === 'accepted_by_user' || a.status === 'pending_acceptance').length}</p> <p className="text-sm text-neutral">Tasks currently assigned in your organization</p> </div>
+                 <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Completed Tasks</h3> <p className="text-3xl font-bold text-textlight">{assignments.filter(a => a.status === 'completed_admin_approved').length}</p> <p className="text-sm text-neutral">Successfully finished tasks in your organization</p> </div>
             </div>
-            <div className="bg-surface p-6 rounded-lg shadow-lg mt-6">
-                <h3 className="text-xl font-medium text-textlight mb-4">Admin Activity Log</h3>
-                <form onSubmit={handleAddAdminLogWithImage} className="mb-4 space-y-3">
-                    <FormTextarea
-                        id="adminLogText"
-                        label="New Log Entry (Optional if uploading image)"
-                        value={adminLogText}
-                        onChange={(e) => setAdminLogText(e.target.value)}
-                        placeholder="Describe admin action or event..."
-                    />
-                    <div>
-                        <label htmlFor="adminLogImage" className="block text-sm font-medium text-textlight">Upload Image (Optional)</label>
-                        <input
-                            id="adminLogImage"
-                            type="file"
-                            accept="image/*"
-                            onChange={(e) => setAdminLogImageFile(e.target.files ? e.target.files[0] : null)}
-                            className="mt-1 block w-full text-sm text-neutral file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-white hover:file:bg-primary-dark"
-                        />
-                         {adminLogImageFile && <p className="text-xs text-neutral mt-1">Selected: {adminLogImageFile.name}</p>}
-                    </div>
-                    <button type="submit" className="btn-primary" disabled={isSubmittingLog}>
-                        {isSubmittingLog ? <LoadingSpinner/> : "Add Log Entry"}
-                    </button>
-                </form>
-                <div className="max-h-96 overflow-y-auto space-y-3">
-                    {adminLogs.length > 0 ? adminLogs.map(log => (
-                        <div key={log.id} className="p-3 bg-bground rounded-md shadow">
-                            <p className="text-sm text-textlight"><strong className="font-medium">{log.adminDisplayName}</strong>: {log.logText}</p>
-                            {log.imagePreviewUrl && (
-                                <img src={log.imagePreviewUrl} alt="Admin log image" className="mt-2 rounded max-h-40"/>
-                            )}
-                            <p className="text-xs text-neutral mt-1">{new Date(log.timestamp).toLocaleString()}</p>
-                        </div>
-                    )) : <p className="text-neutral">No admin activities logged yet.</p>}
-                </div>
+
+            <div className="bg-surface p-6 rounded-lg shadow-md">
+              <h3 className="text-xl font-semibold text-primary mb-4">Admin Log Entry</h3>
+              <form onSubmit={handleAdminLogSubmit} className="space-y-4">
+                <FormTextarea label="Log Message" id="adminLogText" value={adminLogText} onChange={(e) => setAdminLogText(e.target.value)} placeholder="Enter log details..." />
+                <div> <label htmlFor="adminLogImage" className="block text-sm font-medium text-textlight">Attach Image (Optional)</label> <input type="file" id="adminLogImage" aria-label="Attach image to admin log" accept="image/*" onChange={(e) => setAdminLogImageFile(e.target.files ? e.target.files[0] : null)} className="mt-1 block w-full text-sm text-neutral file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-white hover:file:bg-blue-600"/> </div>
+                <button type="submit" className="btn-primary" disabled={isSubmittingLog}> {isSubmittingLog ? <LoadingSpinner/> : 'Add Log Entry'} </button>
+              </form>
+            </div>
+
+            <div className="bg-surface p-6 rounded-lg shadow-md">
+                <h3 className="text-xl font-semibold text-primary mb-4">Recent Admin Logs (Your Organization)</h3>
+                {adminLogs.length === 0 ? <p className="text-neutral">No admin logs for your organization.</p> : (
+                    <ul className="space-y-3 max-h-96 overflow-y-auto">
+                    {adminLogs.slice(0, 10).map(log => ( <li key={log.id} className="p-3 bg-bground rounded-md shadow-sm"> <p className="text-sm text-textlight"><strong className="font-medium">{log.adminDisplayName}</strong>: {log.logText}</p> <p className="text-xs text-neutral mt-1">{new Date(log.timestamp).toLocaleString()}</p> {log.imagePreviewUrl && <div className="mt-2"><img src={log.imagePreviewUrl} alt="Log attachment" className="max-h-40 max-w-xs rounded border border-neutral"/></div>} </li> ))}
+                    </ul>
+                )}
             </div>
           </div>
         )}
 
         {currentPage === Page.UserProfile && (
-          <div className="max-w-2xl mx-auto bg-surface p-8 rounded-lg shadow-xl">
+          <div className="max-w-2xl mx-auto bg-surface p-6 rounded-lg shadow-md">
             <h2 className="text-2xl font-semibold text-primary mb-6">My Profile</h2>
-            <form onSubmit={handleUpdateProfile} className="space-y-6">
-              <FormInput label="System ID / Username" id="profileUniqueId" type="text" value={userForm.uniqueId} onChange={e => setUserForm({ ...userForm, uniqueId: e.target.value })} required />
-              <FormInput label="Display Name" id="profileDisplayName" type="text" value={userForm.displayName} onChange={e => setUserForm({ ...userForm, displayName: e.target.value })} required />
-              <FormInput label="Email Address (cannot be changed)" id="profileEmail" type="email" value={userForm.email} readOnly disabled className="bg-gray-100 cursor-not-allowed" />
-              <FormInput label="Position / Role Title" id="profilePosition" type="text" value={userForm.position} onChange={e => setUserForm({ ...userForm, position: e.target.value })} required />
-              <FormTextarea label="My Interests (helps with task matching)" id="profileUserInterests" value={userForm.userInterests} onChange={e => setUserForm({ ...userForm, userInterests: e.target.value })} />
-              <FormInput label="Phone Number (Optional)" id="profilePhone" type="tel" value={userForm.phone} onChange={e => setUserForm({ ...userForm, phone: e.target.value })} />
-              <FormSelect label="Notification Preference" id="profileNotificationPreference" value={userForm.notificationPreference} onChange={e => setUserForm({ ...userForm, notificationPreference: e.target.value as NotificationPreference })}>
-                <option value="email">Email</option>
-                <option value="phone">Phone (if number provided - SMS not implemented)</option>
-                <option value="none">None</option>
-              </FormSelect>
-              <hr className="my-4 border-neutral"/>
-              <p className="text-sm text-textlight">Update Password (leave blank to keep current password):</p>
-              <FormInput label="New Password" id="profilePassword" type="password" value={userForm.password || ''} onChange={e => setUserForm({...userForm, password: e.target.value })} aria-describedby="passwordHelpProfile" />
-               <p id="passwordHelpProfile" className="mt-1 text-xs text-neutral">{passwordRequirementsText}</p>
-              <FormInput label="Confirm New Password" id="profileConfirmPassword" type="password" value={userForm.confirmPassword || ''} onChange={e => setUserForm({ ...userForm, confirmPassword: e.target.value })} />
-              <button type="submit" className="btn-primary w-full py-2.5">Update Profile</button>
+            <form onSubmit={handleUpdateProfile} className="space-y-4">
+              <FormInput label="Email (Cannot be changed)" id="profileEmail" type="email" value={userForm.email} readOnly disabled description="Login email cannot be changed." />
+               <FormInput label="Organization ID (Cannot be changed)" id="profileOrgId" type="text" value={userForm.organizationId} readOnly disabled description="Your site/organization identifier." />
+              <FormInput label="System ID / Username" id="profileUniqueId" type="text" value={userForm.uniqueId} onChange={e => setUserForm({...userForm, uniqueId: e.target.value})} required description="Your unique system identifier." />
+              <FormInput label="Display Name" id="profileDisplayName" type="text" value={userForm.displayName} onChange={e => setUserForm({...userForm, displayName: e.target.value})} required />
+              <FormInput label="Position / Role Title" id="profilePosition" type="text" value={userForm.position} onChange={e => setUserForm({...userForm, position: e.target.value})} required />
+              <FormTextarea label="My Skills & Interests" id="profileUserInterests" value={userForm.userInterests} onChange={e => setUserForm({...userForm, userInterests: e.target.value})} placeholder="e.g., Python, data analysis" />
+              <FormInput label="Phone (Optional)" id="profilePhone" type="tel" value={userForm.phone} onChange={e => setUserForm({...userForm, phone: e.target.value})} />
+              <FormSelect label="Notification Preference" id="profileNotificationPreference" value={userForm.notificationPreference} onChange={e => setUserForm({...userForm, notificationPreference: e.target.value as NotificationPreference})}> <option value="email">Email</option> <option value="phone" disabled>Phone (Not Implemented)</option> <option value="none">None</option> </FormSelect>
+               <div className="pt-4 border-t border-gray-200">
+                <h3 className="text-lg font-medium text-textlight mb-2">Change Password (Optional)</h3>
+                <FormInput label="New Password" id="profileNewPassword" type="password" value={userForm.password} onChange={e => setUserForm({...userForm, password: e.target.value})} description={passwordRequirementsText} autoComplete="new-password" />
+                <FormInput label="Confirm New Password" id="profileConfirmPassword" type="password" value={userForm.confirmPassword} onChange={e => setUserForm({...userForm, confirmPassword: e.target.value})} autoComplete="new-password" />
+              </div>
+              <button type="submit" className="btn-primary">Update Profile</button>
             </form>
           </div>
         )}
 
         {currentPage === Page.UserManagement && currentUser.role === 'admin' && (
-          <div className="space-y-8">
-            <div>
-              <h2 className="text-3xl font-semibold text-primary mb-6">User Management</h2>
-              <div className="flex justify-between items-center mb-4">
-                <button onClick={() => { setUserForm(initialUserFormData); setEditingUserId(null); navigateTo(Page.UserManagement, {action: 'create'});}} className="btn-primary inline-flex items-center">
-                  <PlusCircleIcon className="w-5 h-5 mr-2"/> Create New User
-                </button>
-                 <button onClick={handleGeneratePreRegistrationLink} className="btn-secondary inline-flex items-center">
-                    <KeyIcon className="w-5 h-5 mr-2" /> Generate Pre-Registration Link
-                </button>
+          <div className="space-y-6">
+            <h2 className="text-2xl font-semibold text-primary mb-1">User Management (Organization: {currentUser.organizationId})</h2>
+            <p className="text-sm text-neutral mb-6">Manage accounts, approve registrations, view details for your organization.</p>
+
+            {editingUserId || approvingPendingUser || new URLSearchParams(window.location.hash.split('?')[1]).get('action') === 'createUser' ? (
+              <div className="bg-surface p-6 rounded-lg shadow-md">
+                <h3 className="text-xl font-semibold text-accent mb-4"> {editingUserId ? `Edit User: ${users.find(u=>u.id===editingUserId)?.displayName || ''}` : (approvingPendingUser ? `Approve: ${approvingPendingUser.displayName}` : 'Create New User (for your organization)')} </h3>
+                <form onSubmit={editingUserId ? handleAdminUpdateUser : (approvingPendingUser ? handleApprovePendingUser : handleCreateUserByAdmin)} className="space-y-4">
+                  <FormInput label="Email" id="userMgmtEmail" type="email" value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} required />
+                  <FormInput label="System ID / Username" id="userMgmtUniqueId" type="text" value={userForm.uniqueId} onChange={e => setUserForm({...userForm, uniqueId: e.target.value})} required />
+                  <FormInput label="Display Name" id="userMgmtDisplayName" type="text" value={userForm.displayName} onChange={e => setUserForm({...userForm, displayName: e.target.value})} required />
+                  <FormInput label="Position / Role Title" id="userMgmtPosition" type="text" value={userForm.position} onChange={e => setUserForm({...userForm, position: e.target.value})} required />
+                  <FormTextarea label="Skills & Interests" id="userMgmtUserInterests" value={userForm.userInterests} onChange={e => setUserForm({...userForm, userInterests: e.target.value})} />
+                  <FormInput label="Phone (Optional)" id="userMgmtPhone" type="tel" value={userForm.phone} onChange={e => setUserForm({...userForm, phone: e.target.value})} />
+                  <FormSelect label="Notification Preference" id="userMgmtNotificationPreference" value={userForm.notificationPreference} onChange={e => setUserForm({...userForm, notificationPreference: e.target.value as NotificationPreference})}> <option value="email">Email</option> <option value="phone" disabled>Phone (Not Implemented)</option> <option value="none">None</option> </FormSelect>
+                  
+                  <FormSelect label="Role" id="userMgmtRole" value={userForm.role} 
+                    onChange={e => setUserForm({...userForm, role: e.target.value as Role})} 
+                    disabled={!!approvingPendingUser || (editingUserId && users.find(u=>u.id===editingUserId)?.role === 'admin' && users.filter(u=>u.role==='admin').length <=1 )}>
+                     <option value="user">User</option>
+                     <option value="admin">Administrator (for this organization)</option>
+                  </FormSelect>
+                   {approvingPendingUser && <p className="text-xs text-neutral">Role for pending user is typically 'user' upon approval. Backend may enforce policies.</p>}
+                   {(editingUserId && users.find(u=>u.id===editingUserId)?.role === 'admin' && users.filter(u=>u.role==='admin').length <=1 ) && <p className="text-xs text-neutral">Cannot demote the sole administrator of the organization.</p>}
+
+
+                  {!approvingPendingUser && (
+                    <div className="pt-4 border-t border-gray-200">
+                        <h3 className="text-lg font-medium text-textlight mb-2">{editingUserId ? 'Reset Password (Optional)' : 'Set Password'}</h3>
+                        <FormInput label="Password" id="userMgmtPassword" type="password" value={userForm.password} onChange={e => setUserForm({...userForm, password: e.target.value})} required={!editingUserId} description={passwordRequirementsText} autoComplete="new-password"/>
+                        <FormInput label="Confirm Password" id="userMgmtConfirmPassword" type="password" value={userForm.confirmPassword} onChange={e => setUserForm({...userForm, confirmPassword: e.target.value})} required={!editingUserId} autoComplete="new-password" />
+                    </div>
+                  )}
+                  <div className="flex space-x-3"> <button type="submit" className="btn-success"> {editingUserId ? 'Save Changes' : (approvingPendingUser ? 'Approve & Create' : 'Create User')} </button> <button type="button" className="btn-neutral" onClick={() => { setEditingUserId(null); setApprovingPendingUser(null); setUserForm(initialUserFormData); clearMessages(); navigateTo(Page.UserManagement); }}>Cancel</button> </div>
+                </form>
               </div>
-              {generatedLink && (
-                  <div className="mb-4 p-3 bg-blue-100 border border-blue-400 text-blue-700 rounded-md shadow flex justify-between items-center">
-                      <div>
-                        <p className="font-medium">Generated Link (Share with user):</p>
-                        <input type="text" readOnly value={generatedLink} className="w-full mt-1 p-2 border border-blue-300 rounded bg-blue-50 text-sm" />
-                      </div>
-                      <button onClick={() => copyToClipboard(generatedLink)} className="ml-4 btn-neutral text-sm px-3 py-1.5">Copy</button>
-                  </div>
-              )}
+            ) : ( <button onClick={() => { setUserForm({...initialUserFormData, role: 'user', organizationId: currentUser.organizationId}); clearMessages(); navigateTo(Page.UserManagement, {action: 'createUser'}); }} className="btn-primary mb-4 flex items-center"><PlusCircleIcon className="w-5 h-5 mr-2"/>Add New User</button> )}
 
-              {new URLSearchParams(window.location.hash.split('?')[1]).get('action') === 'create' && !editingUserId && (
-                 <div className="bg-surface p-6 rounded-lg shadow-xl mt-6">
-                    <h3 className="text-xl font-medium text-textlight mb-4">Create New User Form</h3>
-                    <form onSubmit={handleCreateUserByAdmin} className="space-y-4">
-                        <FormInput label="Email" id="adminCreateEmail" type="email" value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} required />
-                        <FormInput label="System ID / Username" id="adminCreateUniqueId" type="text" value={userForm.uniqueId} onChange={e => setUserForm({...userForm, uniqueId: e.target.value})} required />
-                        <FormInput label="Display Name" id="adminCreateDisplayName" type="text" value={userForm.displayName} onChange={e => setUserForm({...userForm, displayName: e.target.value})} required />
-                        <FormInput label="Position" id="adminCreatePosition" type="text" value={userForm.position} onChange={e => setUserForm({...userForm, position: e.target.value})} required />
-                        <FormSelect label="Role" id="adminCreateRole" value={userForm.role} onChange={e => setUserForm({...userForm, role: e.target.value as Role})}>
-                            <option value="user">User</option>
-                            <option value="admin">Admin</option>
-                        </FormSelect>
-                        <FormTextarea label="User Interests (Optional)" id="adminCreateUserInterests" value={userForm.userInterests} onChange={e => setUserForm({...userForm, userInterests: e.target.value})} />
-                        <FormInput label="Phone (Optional)" id="adminCreatePhone" type="tel" value={userForm.phone} onChange={e => setUserForm({...userForm, phone: e.target.value})} />
-                        <FormSelect label="Notification Preference" id="adminCreateNotifPref" value={userForm.notificationPreference} onChange={e => setUserForm({...userForm, notificationPreference: e.target.value as NotificationPreference})}>
-                            <option value="email">Email</option><option value="phone">Phone</option><option value="none">None</option>
-                        </FormSelect>
-                        <FormInput label="Password" id="adminCreatePassword" type="password" value={userForm.password || ''} onChange={e => setUserForm({...userForm, password: e.target.value})} required aria-describedby="passwordHelpAdminCreate" />
-                        <p id="passwordHelpAdminCreate" className="mt-1 text-xs text-neutral">{passwordRequirementsText}</p>
-                        <FormInput label="Confirm Password" id="adminCreateConfirmPassword" type="password" value={userForm.confirmPassword || ''} onChange={e => setUserForm({...userForm, confirmPassword: e.target.value})} required />
-                        <div className="flex space-x-3">
-                           <button type="submit" className="btn-primary">Create User</button>
-                           <button type="button" onClick={() => navigateTo(Page.UserManagement)} className="btn-neutral">Cancel</button>
-                        </div>
-                    </form>
-                </div>
-              )}
-               {editingUserId && (
-                 <div className="bg-surface p-6 rounded-lg shadow-xl mt-6">
-                    <h3 className="text-xl font-medium text-textlight mb-4">Edit User: {users.find(u=>u.id === editingUserId)?.displayName}</h3>
-                     <form onSubmit={handleAdminUpdateUser} className="space-y-4">
-                        <FormInput label="Email" id="adminEditEmail" type="email" value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} required />
-                        <FormInput label="System ID / Username" id="adminEditUniqueId" type="text" value={userForm.uniqueId} onChange={e => setUserForm({...userForm, uniqueId: e.target.value})} required />
-                        <FormInput label="Display Name" id="adminEditDisplayName" type="text" value={userForm.displayName} onChange={e => setUserForm({...userForm, displayName: e.target.value})} required />
-                        <FormInput label="Position" id="adminEditPosition" type="text" value={userForm.position} onChange={e => setUserForm({...userForm, position: e.target.value})} required />
-                        <FormSelect label="Role" id="adminEditRole" value={userForm.role} onChange={e => setUserForm({...userForm, role: e.target.value as Role})}>
-                            <option value="user">User</option>
-                            <option value="admin">Admin</option>
-                        </FormSelect>
-                        <FormTextarea label="User Interests (Optional)" id="adminEditUserInterests" value={userForm.userInterests} onChange={e => setUserForm({...userForm, userInterests: e.target.value})} />
-                        <FormInput label="Phone (Optional)" id="adminEditPhone" type="tel" value={userForm.phone} onChange={e => setUserForm({...userForm, phone: e.target.value})} />
-                        <FormSelect label="Notification Preference" id="adminEditNotifPref" value={userForm.notificationPreference} onChange={e => setUserForm({...userForm, notificationPreference: e.target.value as NotificationPreference})}>
-                            <option value="email">Email</option><option value="phone">Phone</option><option value="none">None</option>
-                        </FormSelect>
-                        <FormInput label="New Password (Optional)" id="adminEditPassword" type="password" value={userForm.password || ''} onChange={e => setUserForm({...userForm, password: e.target.value})} aria-describedby="passwordHelpAdminEdit" />
-                        <p id="passwordHelpAdminEdit" className="mt-1 text-xs text-neutral">{passwordRequirementsText}</p>
-                        <FormInput label="Confirm New Password" id="adminEditConfirmPassword" type="password" value={userForm.confirmPassword || ''} onChange={e => setUserForm({...userForm, confirmPassword: e.target.value})} />
-                        <div className="flex space-x-3">
-                           <button type="submit" className="btn-primary">Save Changes</button>
-                           <button type="button" onClick={() => { setEditingUserId(null); navigateTo(Page.UserManagement);}} className="btn-neutral">Cancel</button>
-                        </div>
-                    </form>
+             <div className="bg-surface p-6 rounded-lg shadow-md">
+              <h3 className="text-xl font-semibold text-accent mb-3">Pre-registration Link (for your organization)</h3>
+              <button onClick={handleGeneratePreRegistrationLink} className="btn-secondary flex items-center"><KeyIcon className="w-5 h-5 mr-2"/>Generate Link</button>
+              {generatedLink && ( <div className="mt-3 p-3 bg-bground rounded"> <p className="text-sm text-textlight break-all">{generatedLink}</p> <button onClick={() => copyToClipboard(generatedLink)} className="text-xs btn-neutral mt-2">Copy</button> </div> )}
+            </div>
+
+            <div className="bg-surface p-6 rounded-lg shadow-md">
+              <h3 className="text-xl font-semibold text-accent mb-4">Pending Approvals ({pendingUsers.length})</h3>
+              {pendingUsers.length === 0 ? <p className="text-neutral">No users awaiting approval for your organization.</p> : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-bground"> <tr> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Name</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Email / System ID</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Intended Role / Date</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Actions</th> </tr> </thead>
+                    <tbody className="bg-surface divide-y divide-gray-200">
+                      {pendingUsers.map(pu => {
+                        const canApprove = currentUser && currentUser.role === 'admin' && pu.organizationId === currentUser.organizationId;
+                        return (
+                          <tr key={pu.id}>
+                            <td className="px-4 py-3 text-sm text-textlight">{pu.displayName}</td>
+                            <td className="px-4 py-3 text-sm text-textlight">{pu.email} ({pu.uniqueId})</td>
+                            <td className="px-4 py-3 text-sm text-textlight">{pu.role} <br/><span className="text-xs text-neutral">{new Date(pu.submissionDate).toLocaleDateString()}</span></td>
+                            <td className="px-4 py-3 text-sm space-x-2">
+                              <button
+                                onClick={() => { setApprovingPendingUser(pu); setUserForm({ id:'', email: pu.email, uniqueId: pu.uniqueId, displayName: pu.displayName, position: '', userInterests: '', phone: '', notificationPreference: 'email', role: pu.role, password: '', confirmPassword: '', referringAdminId: pu.referringAdminId || currentUser?.id || '', organizationId: currentUser.organizationId }); setEditingUserId(null); navigateTo(Page.UserManagement, {action: 'approveUser', userId: pu.id}); clearMessages(); }}
+                                className={`btn-success text-xs px-2 py-1 ${!canApprove ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                disabled={!canApprove}
+                                title={!canApprove ? "Approval restricted." : "Approve this user"}
+                              >
+                                Approve
+                              </button>
+                              <button onClick={() => handleRejectPendingUser(pu.id)} className="btn-danger text-xs px-2 py-1" disabled={!canApprove}>Reject</button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
 
-            <div className="bg-surface p-6 rounded-lg shadow-xl overflow-x-auto">
-              <h3 className="text-xl font-medium text-textlight mb-4">Registered Users</h3>
-               <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-neutral uppercase tracking-wider">Name</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-neutral uppercase tracking-wider">System ID</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-neutral uppercase tracking-wider">Email</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-neutral uppercase tracking-wider">Role</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-neutral uppercase tracking-wider">Position</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-neutral uppercase tracking-wider">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-surface divide-y divide-gray-200 text-sm text-textlight">
-                    {users.map(user => (
-                      <tr key={user.id}>
-                        <td className="px-6 py-4 whitespace-nowrap">{user.displayName}</td>
-                        <td className="px-6 py-4 whitespace-nowrap">{user.uniqueId}</td>
-                        <td className="px-6 py-4 whitespace-nowrap">{user.email}</td>
-                        <td className="px-6 py-4 whitespace-nowrap capitalize">{user.role}</td>
-                        <td className="px-6 py-4 whitespace-nowrap">{user.position}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
-                          <button onClick={() => { setEditingUserId(user.id); setUserForm({...user, password:'', confirmPassword:''}); navigateTo(Page.UserManagement, {action: 'edit', userId: user.id});}} className="text-primary hover:text-primary-dark">Edit</button>
-                          {currentUser.id !== user.id && user.role !== 'admin' && ( 
-                             <button onClick={() => handleDeleteUser(user.id)} className="text-danger hover:text-red-700">Delete</button>
-                          )}
-                           {currentUser.id !== user.id && user.role === 'admin' && users.filter(u=>u.role==='admin').length > 1 && ( 
-                             <button onClick={() => handleDeleteUser(user.id)} className="text-danger hover:text-red-700">Delete</button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-            </div>
-
-            {approvingPendingUser && (
-                <div className="bg-surface p-6 rounded-lg shadow-xl mt-6">
-                    <h3 className="text-xl font-medium text-textlight mb-4">Review & Approve: {approvingPendingUser.displayName} ({approvingPendingUser.email})</h3>
-                    <form onSubmit={(e) => { e.preventDefault(); handleApprovePendingUser(); }} className="space-y-4">
-                        <p className="text-sm text-neutral">System ID: {approvingPendingUser.uniqueId}</p>
-                        <FormInput label="Position (Required)" id="approvePosition" type="text" value={userForm.position} onChange={e => setUserForm({...userForm, position: e.target.value})} required />
-                        <FormSelect label="Assign Role (Required)" id="approveRole" value={userForm.role} onChange={e => setUserForm({...userForm, role: e.target.value as Role})} required>
-                             <option value="user">User</option>
-                             <option value="admin">Admin (Use with caution)</option>
-                        </FormSelect>
-                        <FormTextarea label="User Interests (Optional)" id="approveUserInterests" value={userForm.userInterests} onChange={e => setUserForm({...userForm, userInterests: e.target.value})} />
-                        <FormInput label="Phone (Optional)" id="approvePhone" type="tel" value={userForm.phone} onChange={e => setUserForm({...userForm, phone: e.target.value})} />
-                        <FormSelect label="Notification Preference" id="approveNotifPref" value={userForm.notificationPreference} onChange={e => setUserForm({...userForm, notificationPreference: e.target.value as NotificationPreference})}>
-                            <option value="email">Email</option><option value="phone">Phone</option><option value="none">None</option>
-                        </FormSelect>
-                         <div className="flex space-x-3">
-                           <button type="submit" className="btn-success">Approve User</button>
-                           <button type="button" onClick={() => setApprovingPendingUser(null)} className="btn-neutral">Cancel</button>
-                        </div>
-                    </form>
+            <div className="bg-surface p-6 rounded-lg shadow-md">
+              <h3 className="text-xl font-semibold text-accent mb-4">Active Users ({users.length})</h3>
+              {users.length === 0 ? <p className="text-neutral">No active users in your organization.</p> : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-bground"> <tr> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Name</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Email / System ID</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Role / Position</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Actions</th> </tr> </thead>
+                    <tbody className="bg-surface divide-y divide-gray-200">
+                      {users.map(user => ( <tr key={user.id}> <td className="px-4 py-3 text-sm font-medium text-textlight">{user.displayName}</td> <td className="px-4 py-3 text-sm text-textlight">{user.email}<br/><span className="text-xs text-neutral">{user.uniqueId}</span></td> <td className="px-4 py-3 text-sm text-textlight capitalize">{user.role}<br/><span className="text-xs text-neutral">{user.position}</span></td> <td className="px-4 py-3 text-sm space-x-2"> 
+                        {currentUser.id !== user.id && ( 
+                            <button onClick={() => { setEditingUserId(user.id); setUserForm({ ...user, password: '', confirmPassword: '' }); setApprovingPendingUser(null); navigateTo(Page.UserManagement, {action: 'editUser', userId: user.id}); clearMessages(); }} className="btn-info text-xs px-2 py-1"> Edit </button> 
+                        )}
+                        {currentUser.id !== user.id && ( 
+                          <button onClick={() => handleDeleteUser(user.id)} className={`btn-danger text-xs px-2 py-1 ${user.role === 'admin' && users.filter(u => u.role === 'admin').length <= 1 ? 'opacity-50 cursor-not-allowed' : ''}`} disabled={user.role === 'admin' && users.filter(u => u.role === 'admin').length <=1 } title={user.role === 'admin'  && users.filter(u => u.role === 'admin').length <=1 ? "Cannot delete the sole admin of the organization." : "Delete user"}>Delete</button> 
+                        )} 
+                        {currentUser.id === user.id && (
+                           <button onClick={() => navigateTo(Page.UserProfile)} className="btn-neutral text-xs px-2 py-1">My Profile</button>
+                        )}
+                      </td> </tr> ))}
+                    </tbody>
+                  </table>
                 </div>
-            )}
-            <div className="bg-surface p-6 rounded-lg shadow-xl mt-8 overflow-x-auto">
-              <h3 className="text-xl font-medium text-textlight mb-4">Pending User Registrations</h3>
-              {pendingUsers.length > 0 ? (
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-neutral uppercase tracking-wider">Display Name</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-neutral uppercase tracking-wider">Email</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-neutral uppercase tracking-wider">Desired System ID</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-neutral uppercase tracking-wider">Submission Date</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-neutral uppercase tracking-wider">Referring Admin</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-neutral uppercase tracking-wider">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-surface divide-y divide-gray-200 text-sm text-textlight">
-                    {pendingUsers.map(pu => (
-                      <tr key={pu.id}>
-                        <td className="px-6 py-4 whitespace-nowrap">{pu.displayName}</td>
-                        <td className="px-6 py-4 whitespace-nowrap">{pu.email}</td>
-                        <td className="px-6 py-4 whitespace-nowrap">{pu.uniqueId}</td>
-                        <td className="px-6 py-4 whitespace-nowrap">{new Date(pu.submissionDate).toLocaleDateString()}</td>
-                        <td className="px-6 py-4 whitespace-nowrap">{users.find(u => u.id === pu.referringAdminId)?.displayName || 'N/A'}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
-                          <button onClick={() => { setApprovingPendingUser(pu); setUserForm({...initialUserFormData, email: pu.email, uniqueId: pu.uniqueId, displayName: pu.displayName, role: pu.role}); }} className="text-green-600 hover:text-green-800">Approve</button>
-                          <button onClick={() => handleRejectPendingUser(pu.id)} className="text-danger hover:text-red-700">Reject</button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : <p className="text-neutral">No pending user registrations.</p>}
+              )}
             </div>
           </div>
         )}
 
         {currentPage === Page.ManagePrograms && currentUser.role === 'admin' && (
           <div className="space-y-6">
-            <h2 className="text-3xl font-semibold text-primary mb-6">Manage Programs</h2>
-            <div className="bg-surface p-6 rounded-lg shadow-xl">
-              <h3 className="text-xl font-medium text-textlight mb-4">Create New Program</h3>
-              <form onSubmit={handleCreateProgram} className="space-y-4">
-                <FormInput label="Program Name" id="programName" value={programForm.name} onChange={e => setProgramForm({ ...programForm, name: e.target.value })} required />
-                <FormTextarea label="Program Description" id="programDescription" value={programForm.description} onChange={e => setProgramForm({ ...programForm, description: e.target.value })} required />
-                <button type="submit" className="btn-primary">Create Program</button>
-              </form>
-            </div>
-            <div className="bg-surface p-6 rounded-lg shadow-xl mt-6 overflow-x-auto">
-              <h3 className="text-xl font-medium text-textlight mb-4">Existing Programs</h3>
-              {programs.length > 0 ? (
-                 <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                        <tr>
-                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-neutral uppercase tracking-wider">Name</th>
-                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-neutral uppercase tracking-wider">Description</th>
-                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-neutral uppercase tracking-wider">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody className="bg-surface divide-y divide-gray-200 text-sm text-textlight">
-                        {programs.map(program => (
-                            <tr key={program.id}>
-                                <td className="px-6 py-4 whitespace-nowrap font-medium">{program.name}</td>
-                                <td className="px-6 py-4 "><p className="w-96 truncate" title={program.description}>{program.description}</p></td>
-                                <td className="px-6 py-4 whitespace-nowrap">
-                                    <button onClick={() => handleDeleteProgram(program.id)} className="text-danger hover:text-red-700 flex items-center text-sm">
-                                        <TrashIcon className="w-4 h-4 mr-1"/> Delete
-                                    </button>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                 </table>
-              ) : <p className="text-neutral">No programs created yet.</p>}
-            </div>
+            <h2 className="text-2xl font-semibold text-primary mb-6">Manage Programs (Organization: {currentUser.organizationId})</h2>
+            <div className="bg-surface p-6 rounded-lg shadow-md"> <h3 className="text-xl font-semibold text-accent mb-4">Create Program</h3> <form onSubmit={handleCreateProgram} className="space-y-4"> <FormInput label="Program Name" id="programName" value={programForm.name} onChange={e => setProgramForm({...programForm, name: e.target.value})} required /> <FormTextarea label="Program Description" id="programDescription" value={programForm.description} onChange={e => setProgramForm({...programForm, description: e.target.value})} required /> <button type="submit" className="btn-primary">Create</button> </form> </div>
+            <div className="bg-surface p-6 rounded-lg shadow-md"> <h3 className="text-xl font-semibold text-accent mb-4">Existing Programs ({programs.length})</h3> {programs.length === 0 ? <p className="text-neutral">No programs in your organization.</p> : ( <ul className="space-y-3"> {programs.map(p => ( <li key={p.id} className="p-4 bg-bground rounded-md shadow flex justify-between items-start"> <div> <h4 className="font-semibold text-textlight">{p.name}</h4> <p className="text-sm text-neutral">{p.description}</p> </div> <button onClick={() => handleDeleteProgram(p.id)} className="btn-danger text-xs p-1 ml-2 self-start"><TrashIcon className="w-4 h-4"/></button> </li> ))} </ul> )} </div>
           </div>
         )}
 
         {currentPage === Page.ManageTasks && currentUser.role === 'admin' && (
-           <div className="space-y-6">
-            <h2 className="text-3xl font-semibold text-primary mb-6">Manage Tasks</h2>
-            <div className="bg-surface p-6 rounded-lg shadow-xl">
-              <h3 className="text-xl font-medium text-textlight mb-4">Create New Task</h3>
-              <form onSubmit={handleCreateTask} className="space-y-4">
-                <FormInput label="Task Title" id="taskTitle" value={taskForm.title} onChange={e => setTaskForm({ ...taskForm, title: e.target.value })} required />
-                <FormTextarea label="Task Description" id="taskDescription" value={taskForm.description} onChange={e => setTaskForm({ ...taskForm, description: e.target.value })} required />
-                <FormInput label="Required Skills (comma-separated)" id="taskSkills" value={taskForm.requiredSkills} onChange={e => setTaskForm({ ...taskForm, requiredSkills: e.target.value })} required />
-                <FormSelect label="Related Program (Optional)" id="taskProgram" value={taskForm.programId} onChange={e => setTaskForm({ ...taskForm, programId: e.target.value })}>
-                  <option value="">None</option>
-                  {programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </FormSelect>
-                <FormInput label="Deadline (Optional)" id="taskDeadline" type="date" value={taskForm.deadline} onChange={e => setTaskForm({ ...taskForm, deadline: e.target.value })} />
-                <button type="submit" className="btn-primary">Create Task</button>
-              </form>
-            </div>
-             <div className="bg-surface p-6 rounded-lg shadow-xl mt-6 overflow-x-auto">
-                <h3 className="text-xl font-medium text-textlight mb-4">Existing Tasks</h3>
-                {tasks.length > 0 ? (
-                    <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                            <tr>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-neutral uppercase tracking-wider">Title</th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-neutral uppercase tracking-wider">Program</th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-neutral uppercase tracking-wider">Skills</th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-neutral uppercase tracking-wider">Deadline</th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-neutral uppercase tracking-wider">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="bg-surface divide-y divide-gray-200 text-sm text-textlight">
-                            {tasks.map(task => (
-                                <tr key={task.id}>
-                                    <td className="px-6 py-4 whitespace-nowrap font-medium">{task.title}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap">{task.programName || 'N/A'}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap">{task.requiredSkills}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap">{task.deadline ? new Date(task.deadline).toLocaleDateString() : 'N/A'}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <button onClick={() => handleDeleteTask(task.id)} className="text-danger hover:text-red-700 flex items-center text-sm">
-                                            <TrashIcon className="w-4 h-4 mr-1"/> Delete
-                                        </button>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                ) : <p className="text-neutral">No tasks created yet.</p>}
-             </div>
+          <div className="space-y-6">
+            <h2 className="text-2xl font-semibold text-primary mb-6">Manage Tasks (Organization: {currentUser.organizationId})</h2>
+             <div className="bg-surface p-6 rounded-lg shadow-md"> <h3 className="text-xl font-semibold text-accent mb-4">Create Task</h3> <form onSubmit={handleCreateTask} className="space-y-4"> <FormInput label="Task Title" id="taskTitle" value={taskForm.title} onChange={e => setTaskForm({...taskForm, title: e.target.value})} required /> <FormTextarea label="Description" id="taskDescription" value={taskForm.description} onChange={e => setTaskForm({...taskForm, description: e.target.value})} required /> <FormTextarea label="Required Skills (comma-separated)" id="taskRequiredSkills" value={taskForm.requiredSkills} onChange={e => setTaskForm({...taskForm, requiredSkills: e.target.value})} required placeholder="e.g., JS, Writing"/> <FormSelect label="Related Program (Optional)" id="taskProgramId" value={taskForm.programId} onChange={e => setTaskForm({...taskForm, programId: e.target.value})}> <option value="">None</option> {programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)} </FormSelect> <FormInput label="Deadline (Optional)" id="taskDeadline" type="date" value={taskForm.deadline} onChange={e => setTaskForm({...taskForm, deadline: e.target.value})} /> <button type="submit" className="btn-primary">Create Task</button> </form> </div>
+            <div className="bg-surface p-6 rounded-lg shadow-md"> <h3 className="text-xl font-semibold text-accent mb-4">Existing Tasks ({tasks.length})</h3> {tasks.length === 0 ? <p className="text-neutral">No tasks in your organization.</p> : ( <ul className="space-y-3"> {tasks.map(task => ( <li key={task.id} className="p-4 bg-bground rounded-md shadow"> <div className="flex justify-between items-start"> <div> <h4 className="font-semibold text-textlight">{task.title}</h4> <p className="text-sm text-neutral mt-1">{task.description}</p> <p className="text-xs text-neutral mt-1"><strong>Skills:</strong> {task.requiredSkills}</p> {task.programName && <p className="text-xs text-neutral mt-1"><strong>Program:</strong> {task.programName}</p>} {task.deadline && <p className="text-xs text-neutral mt-1"><strong>Deadline:</strong> {new Date(task.deadline).toLocaleDateString()}</p>} </div> <button onClick={() => handleDeleteTask(task.id)} className="btn-danger text-xs p-1 ml-2 self-start"><TrashIcon className="w-4 h-4"/></button> </div> <div className="mt-2 pt-2 border-t border-gray-300"> <p className="text-xs font-medium text-neutral">Assigned:</p> <ul className="text-xs list-disc list-inside pl-2"> {assignments.filter(a=>a.taskId===task.id).map(a=>(<li key={`${a.taskId}-${a.personId}`} className="text-neutral">{a.personName} - <span className={`font-semibold ${a.status==='completed_admin_approved'?'text-success':a.status==='declined_by_user'?'text-danger':a.status==='pending_acceptance'?'text-warning':'text-info'}`}>{a.status.replace(/_/g,' ')}</span></li>))} {assignments.filter(a=>a.taskId===task.id).length===0 && <li className="text-neutral">None.</li>}</ul></div></li>))}</ul>)}</div>
           </div>
         )}
 
         {currentPage === Page.AssignWork && currentUser.role === 'admin' && (
           <div className="space-y-6">
-            <h2 className="text-3xl font-semibold text-primary mb-6">Assign Work</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-surface p-6 rounded-lg shadow-xl space-y-4">
-                    <h3 className="text-xl font-medium text-textlight">1. Select a Task</h3>
-                    {tasks.length === 0 && <p className="text-neutral">No tasks available to assign. Create tasks in 'Manage Tasks'.</p>}
-                    <ul className="max-h-96 overflow-y-auto space-y-2">
-                    {tasks
-                        .filter(task => !assignments.some(a => a.taskId === task.id && (a.status === 'pending_acceptance' || a.status === 'accepted_by_user' || a.status === 'completed_admin_approved'))) 
-                        .map(task => (
-                        <li key={task.id}>
-                            <button
-                            onClick={() => { setSelectedTaskForAssignment(task.id); handleFetchAssignmentSuggestion(task.id); }}
-                            className={`w-full text-left p-3 rounded-md border ${selectedTaskForAssignment === task.id ? 'bg-primary text-white border-primary-dark ring-2 ring-primary-focus' : 'bg-bground hover:bg-gray-200 border-neutral'}`}
-                            >
-                            <p className="font-semibold">{task.title}</p>
-                            <p className="text-xs text-neutral-dark">{task.requiredSkills} - Deadline: {task.deadline ? new Date(task.deadline).toLocaleDateString() : 'N/A'}</p>
-                            </button>
-                        </li>
-                    ))}
-                    </ul>
-                </div>
-
-                {selectedTaskForAssignment && (
-                    <div className="bg-surface p-6 rounded-lg shadow-xl space-y-4">
-                        <h3 className="text-xl font-medium text-textlight">2. Assign Task: <span className="text-secondary">{tasks.find(t=>t.id ===selectedTaskForAssignment)?.title}</span></h3>
-                        {isLoadingSuggestion && <LoadingSpinner />}
-                        {assignmentSuggestion && assignmentSuggestion.suggestedPersonName && (
-                            <div className="p-3 bg-blue-50 border border-blue-200 rounded-md">
-                                <p className="text-sm text-blue-700"><LightBulbIcon className="w-5 h-5 inline mr-1 text-blue-500" /> <strong>AI Suggestion:</strong> {assignmentSuggestion.suggestedPersonName}</p>
-                                <p className="text-xs text-blue-600 mt-1">Justification: {assignmentSuggestion.justification}</p>
-                            </div>
-                        )}
-                         {assignmentSuggestion && !assignmentSuggestion.suggestedPersonName && assignmentSuggestion.justification && (
-                            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
-                                 <p className="text-sm text-yellow-700"><LightBulbIcon className="w-5 h-5 inline mr-1 text-yellow-500" /> <strong>AI Note:</strong> {assignmentSuggestion.justification}</p>
-                            </div>
-                        )}
-                        <form onSubmit={(e) => {
-                            const selectedPersonId = (e.target as HTMLFormElement).elements.namedItem('assignPerson') as HTMLSelectElement;
-                            handleAssignTask(e, selectedTaskForAssignment, selectedPersonId.value);
-                            }} className="space-y-4"
-                        >
-                            <FormSelect label="Select Person" id="assignPerson" name="assignPerson" defaultValue={users.find(u => u.displayName === assignmentSuggestion?.suggestedPersonName)?.id || ""}>
-                            <option value="" disabled>-- Choose a person --</option>
-                            {users
-                                .filter(user => user.role === 'user' && !assignments.some(a => a.personId === user.id && (a.status === 'pending_acceptance' || a.status === 'accepted_by_user'))) 
-                                .map(user => (
-                                <option key={user.id} value={user.id}>
-                                    {user.displayName} ({user.position}) - Interests: {user.userInterests?.substring(0,30) || 'N/A'}...
-                                </option>
-                            ))}
-                            </FormSelect>
-                             <FormInput
-                                label="Specific Deadline for this Assignment (Optional - overrides task default)"
-                                id="specificDeadline"
-                                type="date"
-                                value={assignmentForm.specificDeadline || ''}
-                                onChange={e => setAssignmentForm({...assignmentForm, specificDeadline: e.target.value})}
-                            />
-                            <button type="submit" className="btn-primary w-full"  disabled={users.filter(user => user.role === 'user' && !assignments.some(a => a.personId === user.id && (a.status === 'pending_acceptance' || a.status === 'accepted_by_user'))).length === 0}>
-                                Assign Task
-                            </button>
-                             {users.filter(user => user.role === 'user' && !assignments.some(a => a.personId === user.id && (a.status === 'pending_acceptance' || a.status === 'accepted_by_user'))).length === 0 && (
-                                <p className="text-sm text-warning">No users currently available for new assignments.</p>
-                            )}
-                        </form>
-                    </div>
-                )}
+            <h2 className="text-2xl font-semibold text-primary mb-6">Assign Work (Organization: {currentUser.organizationId})</h2>
+            <div className="bg-surface p-6 rounded-lg shadow-md">
+              <FormSelect label="Select Task" id="selectTaskForAssignment" value={selectedTaskForAssignment || ''} onChange={e => { setSelectedTaskForAssignment(e.target.value); setAssignmentSuggestion(null); clearMessages(); }}> <option value="">-- Select Task --</option> {tasks.map(t => (<option key={t.id} value={t.id}>{t.title}</option>))} </FormSelect>
+              {selectedTaskForAssignment && ( <div className="mt-4 p-3 bg-bground rounded"> <h4 className="font-medium text-textlight">Selected Task:</h4> <p className="text-sm text-neutral">{tasks.find(t=>t.id === selectedTaskForAssignment)?.description}</p> <p className="text-xs text-neutral">Skills: {tasks.find(t=>t.id === selectedTaskForAssignment)?.requiredSkills}</p> {tasks.find(t=>t.id === selectedTaskForAssignment)?.deadline && <p className="text-xs">Deadline: {new Date(tasks.find(t=>t.id === selectedTaskForAssignment)!.deadline!).toLocaleDateString()}</p>} </div> )}
+              <button onClick={handleGetAssignmentSuggestion} className="btn-accent mt-4 flex items-center" disabled={!selectedTaskForAssignment || isLoadingSuggestion}> {isLoadingSuggestion ? <LoadingSpinner /> : <><LightBulbIcon className="w-5 h-5 mr-2"/>AI Suggestion</>} </button>
+              {assignmentSuggestion && ( <div className={`mt-4 p-3 rounded shadow-sm ${assignmentSuggestion.suggestedPersonName ? 'bg-green-50' : 'bg-yellow-50'}`}> <p className="text-sm font-medium">{assignmentSuggestion.suggestedPersonName ? `Suggests: ${assignmentSuggestion.suggestedPersonName}` : "AI:"}</p> <p className="text-xs text-neutral">{assignmentSuggestion.justification}</p> </div> )}
+              <form onSubmit={(e) => handleAssignTask(e, assignmentSuggestion?.suggestedPersonName)} className="mt-6 space-y-4">
+                <FormSelect label="Assign to" id="assignPerson" name="assignPerson" required defaultValue={assignmentSuggestion?.suggestedPersonName ? users.find(u => u.displayName === assignmentSuggestion.suggestedPersonName)?.id : ""}> <option value="">-- Select Person --</option> {users.filter(u => u.role === 'user' && !assignments.some(a => a.taskId === selectedTaskForAssignment && a.personId === u.id && (a.status === 'pending_acceptance' || a.status === 'accepted_by_user'))).map(user => ( <option key={user.id} value={user.id}>{user.displayName} ({user.position})</option>))} </FormSelect>
+                <FormInput label="Specific Deadline (Optional)" id="specificDeadline" name="specificDeadline" type="date" value={assignmentForm.specificDeadline} onChange={e => setAssignmentForm({...assignmentForm, specificDeadline: e.target.value})} />
+                <button type="submit" className="btn-primary" disabled={!selectedTaskForAssignment}>Assign Task</button>
+              </form>
             </div>
           </div>
         )}
 
         {currentPage === Page.ViewAssignments && (
           <div className="space-y-6">
-            <h2 className="text-3xl font-semibold text-primary mb-6">My Task Assignments</h2>
-            {assignments.filter(a => currentUser.role === 'admin' || a.personId === currentUser.id).length === 0 && (
-              <p className="text-neutral bg-surface p-4 rounded-md shadow">You currently have no tasks assigned to you. {currentUser.role === 'user' ? "Check 'Available Tasks' or wait for an admin to assign work." : "You can assign tasks from the 'Assign Work' page."}</p>
-            )}
-            <ul className="space-y-4">
-              {assignments
-                .filter(a => currentUser.role === 'admin' || a.personId === currentUser.id) 
-                .sort((a,b) => new Date(b.deadline || 0).getTime() - new Date(a.deadline || 0).getTime()) 
-                .map(assignment => {
-                const taskDetails = tasks.find(t => t.id === assignment.taskId);
-                const isUserAssignment = assignment.personId === currentUser.id;
-                const canAdminApprove = currentUser.role === 'admin' && ['submitted_on_time', 'submitted_late'].includes(assignment.status);
-
-                return (
-                  <li key={`${assignment.taskId}-${assignment.personId}`} className={`bg-surface p-5 rounded-lg shadow-lg border-l-4
-                    ${assignment.status === 'completed_admin_approved' ? 'border-green-500'
-                      : assignment.status === 'declined_by_user' ? 'border-red-500'
-                      : (assignment.status === 'submitted_on_time' || assignment.status === 'submitted_late') ? 'border-blue-500'
-                      : assignment.status === 'accepted_by_user' ? 'border-yellow-500'
-                      : 'border-gray-300'}`
-                  }>
-                    <div className="flex justify-between items-start">
-                        <div>
-                            <h3 className="text-xl font-semibold text-textlight">{assignment.taskTitle}</h3>
-                            {currentUser.role === 'admin' && <p className="text-sm text-neutral">Assigned to: {assignment.personName}</p>}
-                            <p className="text-sm text-neutral mt-1">Status: <span className="font-medium">{assignment.status.replace(/_/g, ' ')}</span></p>
-                            {taskDetails?.description && <p className="text-sm text-textlight mt-1">Description: {taskDetails.description}</p>}
-                            {taskDetails?.requiredSkills && <p className="text-sm text-textlight mt-1">Skills: {taskDetails.requiredSkills}</p>}
-                            {assignment.deadline && <p className="text-sm text-neutral mt-1">Deadline: {new Date(assignment.deadline).toLocaleDateString()}</p>}
-                            {assignment.justification && currentUser.role === 'admin' && <p className="text-xs text-neutral mt-1 italic">Assign Justification: {assignment.justification}</p>}
-                            {assignment.userSubmissionDate && <p className="text-xs text-neutral mt-1">Submitted: {new Date(assignment.userSubmissionDate).toLocaleString()}</p>}
-                            {assignment.userDelayReason && <p className="text-xs text-warning mt-1">Delay Reason: {assignment.userDelayReason}</p>}
-                        </div>
-                         <div className="text-sm text-neutral shrink-0 ml-4">
-                            ID: <span className="font-mono text-xs">{assignment.taskId.slice(-6)}</span>
-                        </div>
-                    </div>
-
-                    <div className="mt-4 pt-3 border-t border-gray-200 flex flex-wrap gap-2">
-                      {isUserAssignment && assignment.status === 'pending_acceptance' && (
-                        <>
-                          <button onClick={() => handleUpdateAssignmentStatus(assignment.taskId, assignment.personId, 'accepted_by_user')} className="btn-success text-sm px-3 py-1.5">Accept Task</button>
-                          <button onClick={() => handleUpdateAssignmentStatus(assignment.taskId, assignment.personId, 'declined_by_user')} className="btn-danger text-sm px-3 py-1.5">Decline Task</button>
-                        </>
-                      )}
-                      {isUserAssignment && assignment.status === 'accepted_by_user' && (
-                        <>
-                          <button onClick={() => {
-                              const isLate = assignment.deadline && new Date() > new Date(assignment.deadline);
-                              if (isLate) {
-                                  setAssignmentToSubmitDelayReason(`${assignment.taskId}-${assignment.personId}`);
-                              } else {
-                                  handleUpdateAssignmentStatus(assignment.taskId, assignment.personId, 'submitted_on_time');
-                              }
-                          }} className="btn-primary text-sm px-3 py-1.5">Mark as Completed / Submit</button>
-
-                          {assignmentToSubmitDelayReason === `${assignment.taskId}-${assignment.personId}` && (
-                            <div className="w-full mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
-                                <FormTextarea label="Submitted Past Deadline - Reason for Delay:" id={`delayReason-${assignment.taskId}`} value={userSubmissionDelayReason} onChange={e => setUserSubmissionDelayReason(e.target.value)} required />
-                                <button onClick={() => handleUpdateAssignmentStatus(assignment.taskId, assignment.personId, 'submitted_late', userSubmissionDelayReason)} className="btn-warning text-sm px-3 py-1.5 mt-2">Submit with Reason</button>
-                            </div>
-                          )}
-                        </>
-                      )}
-                      {canAdminApprove && (
-                        <button onClick={() => handleUpdateAssignmentStatus(assignment.taskId, assignment.personId, 'completed_admin_approved')} className="btn-success text-sm px-3 py-1.5">Approve Completion</button>
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+            <h2 className="text-2xl font-semibold text-primary mb-6">My Assignments</h2>
+            {assignments.filter(a => currentUser.role === 'admin' || a.personId === currentUser.id).length === 0 ? ( <p className="text-neutral bg-surface p-4 rounded-md shadow"> {currentUser.role === 'admin' ? "No assignments in your organization." : "No tasks assigned to you."} </p> ) : (
+              <ul className="space-y-4">
+                {assignments.filter(a => currentUser.role === 'admin' || a.personId === currentUser.id).sort((x,y) => (x.deadline && y.deadline) ? new Date(x.deadline).getTime() - new Date(y.deadline).getTime() : 0).map(assignment => {
+                    const task = tasks.find(t => t.id === assignment.taskId);
+                    const isLate = assignment.deadline && new Date() > new Date(assignment.deadline) && (assignment.status === 'pending_acceptance' || assignment.status === 'accepted_by_user');
+                    const isSubmittedLate = assignment.status === 'submitted_late';
+                    return ( <li key={`${assignment.taskId}-${assignment.personId}`} className="bg-surface p-4 rounded-lg shadow-md"> <h3 className={`text-lg font-semibold ${isLate && !isSubmittedLate ? 'text-danger' : 'text-textlight'}`}>{assignment.taskTitle}</h3> {currentUser.role === 'admin' && <p className="text-sm text-neutral">To: <strong>{assignment.personName}</strong></p>} <p className="text-xs text-neutral mt-1">Status: <span className={`font-medium ${assignment.status==='completed_admin_approved'?'text-success':assignment.status==='declined_by_user'?'text-danger':assignment.status.startsWith('submitted')?'text-info':assignment.status==='pending_acceptance'?'text-warning':'text-blue-500' }`}>{assignment.status.replace(/_/g,' ')}</span> {isLate && !isSubmittedLate && <span className="text-danger text-xs font-bold ml-2">(OVERDUE)</span>} {isSubmittedLate && <span className="text-warning text-xs font-bold ml-2">(LATE)</span>} </p> {task && <p className="text-sm text-neutral mt-1">{task.description}</p>} {task?.requiredSkills && <p className="text-xs">Skills: {task.requiredSkills}</p>} {assignment.deadline && <p className="text-xs">Deadline: {new Date(assignment.deadline).toLocaleDateString()}</p>} {assignment.justification && assignment.justification !== 'Manually assigned by admin.' && <p className="text-xs italic">AI: {assignment.justification}</p>} {assignment.userSubmissionDate && <p className="text-xs">Submitted: {new Date(assignment.userSubmissionDate).toLocaleString()}</p>} {assignment.userDelayReason && <p className="text-xs">Delay reason: {assignment.userDelayReason}</p>}
+                        <div className="mt-3 pt-3 border-t border-gray-200 space-x-2 flex flex-wrap gap-y-2">
+                          {assignment.status === 'pending_acceptance' && assignment.personId === currentUser.id && ( <> <button onClick={() => handleUserAcceptTask(assignment.taskId)} className="btn-success text-sm">Accept</button> <button onClick={() => handleUserDeclineTask(assignment.taskId)} className="btn-danger text-sm">Decline</button> </> )}
+                          {assignment.status === 'accepted_by_user' && assignment.personId === currentUser.id && ( <> {isLate && assignmentToSubmitDelayReason !== `${assignment.taskId}-${assignment.personId}` && ( <button onClick={() => setAssignmentToSubmitDelayReason(`${assignment.taskId}-${assignment.personId}`)} className="btn-warning text-sm">Submit Late</button> )} {assignmentToSubmitDelayReason === `${assignment.taskId}-${assignment.personId}` && isLate && ( <div className="w-full space-y-2 my-2 p-2 border border-warning bg-yellow-50"> <FormTextarea label="Reason for Late Submission:" id={`delayReason-${assignment.taskId}`} value={userSubmissionDelayReason} onChange={e => setUserSubmissionDelayReason(e.target.value)} /> <button onClick={() => handleUserSubmitTask(assignment.taskId, userSubmissionDelayReason)} className="btn-primary text-sm">Confirm</button <button onClick={() => { setAssignmentToSubmitDelayReason(null); setUserSubmissionDelayReason(''); }} className="btn-neutral text-sm ml-2">Cancel</button> </div> )} {!isLate && ( <button onClick={() => handleUserSubmitTask(assignment.taskId)} className="btn-primary text-sm">Mark Completed</button> )} </> )}
+                          {currentUser.role === 'admin' && (assignment.status === 'submitted_on_time' || assignment.status === 'submitted_late') && ( <button onClick={() => handleAdminApproveTaskCompletion(assignment.taskId, assignment.personId)} className="btn-success text-sm">Approve Completion</button> )}
+                        </div> </li> );
+                  })} </ul> )}
           </div>
         )}
 
         {currentPage === Page.ViewTasks && (
-            <div className="space-y-6">
-                <h2 className="text-3xl font-semibold text-primary mb-6">Available Tasks</h2>
-                {tasks.length === 0 && <p className="text-neutral bg-surface p-4 rounded-md shadow">No tasks currently listed. Admins can add tasks via 'Manage Tasks'.</p>}
-                <ul className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {tasks.map(task => {
-                    const currentAssignment = assignments.find(a => a.taskId === task.id && (a.status === 'pending_acceptance' || a.status === 'accepted_by_user' || a.status === 'completed_admin_approved'));
-                    return (
-                    <li key={task.id} className={`bg-surface p-5 rounded-lg shadow-lg border-l-4 ${currentAssignment ? 'border-yellow-400 opacity-70' : 'border-blue-400'}`}>
-                        <h3 className="text-xl font-semibold text-textlight">{task.title}</h3>
-                        <p className="text-sm text-neutral mt-1">Program: {task.programName || 'N/A'}</p>
-                        <p className="text-sm text-textlight mt-2">{task.description}</p>
-                        <p className="text-sm text-textlight mt-2"><strong>Required Skills:</strong> {task.requiredSkills}</p>
-                        {task.deadline && <p className="text-sm text-neutral mt-1">Default Deadline: {new Date(task.deadline).toLocaleDateString()}</p>}
-                        {currentAssignment && (
-                            <div className="mt-3 pt-3 border-t border-gray-200">
-                                <p className="text-xs text-warning">
-                                    Currently assigned to: {currentAssignment.personName} (Status: {currentAssignment.status.replace(/_/g, ' ')})
-                                </p>
-                            </div>
-                        )}
-                        {currentUser.role === 'admin' && !currentAssignment && (
-                             <button
-                                onClick={() => { setSelectedTaskForAssignment(task.id); handleFetchAssignmentSuggestion(task.id); navigateTo(Page.AssignWork);}}
-                                className="mt-4 btn-secondary text-sm px-3 py-1.5"
-                            >
-                                Assign This Task
-                            </button>
-                        )}
-                    </li>
-                );})}
-                </ul>
+            <div className="space-y-6"> <h2 className="text-2xl font-semibold text-primary mb-6">Available Tasks (Your Organization)</h2> {tasks.length === 0 ? ( <p className="text-neutral bg-surface p-4 rounded-md shadow">No tasks defined in your organization.</p> ) : (
+                <ul className="space-y-4">
+                    {tasks.map(task => {
+                        const taskAssignments = assignments.filter(a => a.taskId === task.id);
+                        const isFullyAssigned = taskAssignments.some(a => a.status === 'accepted_by_user' || a.status === 'completed_admin_approved' || a.status.startsWith('submitted'));
+                        const isPending = taskAssignments.some(a => a.status === 'pending_acceptance');
+                        let availability = "Available"; let color = "text-success";
+                        if (isFullyAssigned) { availability = "Assigned/In Progress"; color = "text-neutral"; }
+                        else if (isPending) { availability = "Pending Acceptance"; color = "text-warning"; }
+                        return ( <li key={task.id} className="bg-surface p-4 rounded-lg shadow-md"> <h3 className="text-lg font-semibold">{task.title}</h3> <p className="text-sm mt-1">{task.description}</p> <p className="text-xs mt-1">Skills: {task.requiredSkills}</p> {task.programName && <p className="text-xs">Program: {task.programName}</p>} {task.deadline && <p className="text-xs">Deadline: {new Date(task.deadline).toLocaleDateString()}</p>} <p className={`text-xs font-medium mt-2 ${color}`}>Status: {availability}</p>
+                        {currentUser.role === 'admin' && taskAssignments.length > 0 && ( <div className="mt-2 pt-2 border-t"> <p className="text-xs font-medium">Assignees:</p> <ul className="text-xs list-disc list-inside pl-2"> {taskAssignments.map(a => (<li key={`${a.taskId}-${a.personId}`}>{a.personName} - {a.status.replace(/_/g,' ')}</li>))} </ul> </div> )}
+                        </li> );
+                    })} </ul> )}
             </div>
         )}
-
-        {showUserTour && currentUser && <UserTour user={currentUser} onClose={handleCompleteUserTour} />}
       </main>
     </div>
   );

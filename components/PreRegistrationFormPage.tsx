@@ -176,8 +176,7 @@ const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = ({
           </div>
           <button
             type="submit"
-            className="w-full py-3 px-4 bg-authButton hover:bg-authButtonHover text-textlight font-semibold rounded-md shadow-sm transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={!formState.isReferralLinkValid}
+            className="w-full py-3 px-4 bg-authButton hover:bg-authButtonHover text-textlight font-semibold rounded-md shadow-sm transition-colors text-sm"
           >
             Submit Pre-registration
           </button>

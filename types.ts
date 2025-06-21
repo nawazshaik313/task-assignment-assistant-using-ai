@@ -31,10 +31,10 @@ export interface User {
 
 export interface PendingUser {
   id: string;
-  uniqueId: string;
+  uniqueId: string; 
   displayName:string;
-  email: string;
-  password: string;
+  email: string; 
+  password: string; 
   role: Role; // Intended role from registration
   submissionDate: string;
   referringAdminId?: string; // Optional: ID of admin who generated pre-reg link, or system if general reg.
@@ -69,7 +69,7 @@ export interface Assignment {
   deadline?: string; // Specific deadline for this assignment instance
   userSubmissionDate?: string; // ISO datetime string when user submitted
   userDelayReason?: string; // User's reason if submitted late
-  organizationId: string; // ID of the organization the assignment belongs to.
+  // organizationId: string; // Implicitly handled by API scoping
 }
 
 export enum Page {
