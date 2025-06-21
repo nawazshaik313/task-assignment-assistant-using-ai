@@ -377,7 +377,7 @@ export const App = (): JSX.Element => {
         // This is primarily for display purposes on the pre-reg form.
         fetchData<User[]>(`/users?role=admin&id=${refAdminIdFromHash}`, {}, []).then(admins => {
             const adminUser = admins ? admins.find(u => u.id === refAdminIdFromHash) : null;
-            setPreRegistrationForm(prev => ({
+            setPreRegistrationFormInternal(prev => ({
               ...initialPreRegistrationFormState,
               referringAdminId: refAdminIdFromHash || '',
               referringAdminDisplayName: adminUser ? adminUser.displayName : (refAdminIdFromHash ? `Admin (Site ID: ${refAdminIdFromHash})`: 'an administrator'),
