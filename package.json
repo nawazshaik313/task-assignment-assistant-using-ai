@@ -9,8 +9,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "react": "^19.1.0",
     "@google/genai": "^1.0.1",
+    "jsonwebtoken": "^9.0.2",
+    "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
