@@ -3,13 +3,14 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Page, User, Role, Task, Assignment, Program, GeminiSuggestion, NotificationPreference, AssignmentStatus, PendingUser, AdminLogEntry } from './types';
 import useLocalStorage from './hooks/useLocalStorage';
 import { getAssignmentSuggestion } from './services/geminiService';
-import * as emailService from './src/utils/emailService'; // Corrected import path
-import { validatePassword } from './src/utils/validation'; // Corrected import path
+import * as emailService from './utils/emailService'; // Corrected import path
+import { validatePassword } from './utils/validation'; // Corrected import path
 // import * //as cloudDataService from './services/cloudDataService'; // Deactivated
 import LoadingSpinner from './components/LoadingSpinner';
 import { UsersIcon, ClipboardListIcon, LightBulbIcon, CheckCircleIcon, TrashIcon, PlusCircleIcon, KeyIcon, BriefcaseIcon, LogoutIcon, UserCircleIcon } from './components/Icons';
 import { PreRegistrationFormPage } from './components/PreRegistrationFormPage';
 import UserTour from './components/UserTour';
+import AdminTour from './components/AdminTour';
 // import Sidebar from './components/Sidebar'; // Sidebar is replaced by TopNavbar
 import TopNavbar from './components/TopNavbar'; // Import the new TopNavbar component
 
@@ -242,6 +243,7 @@ export const App = (): JSX.Element => {
   const [isSubmittingLog, setIsSubmittingLog] = useState(false);
 
   const [showUserTour, setShowUserTour] = useState<boolean>(false);
+  const [showAdminTour, setShowAdminTour] = useState<boolean>(false);
 
   const clearMessages = useCallback(() => { setError(null); setSuccessMessage(null); setInfoMessage(null); }, []);
 
@@ -288,7 +290,8 @@ export const App = (): JSX.Element => {
         const [
           loadedUsers, loadedPendingUsers, loadedTasks, loadedPrograms, loadedAssignments, loadedAdminLogs,
         ] = await Promise.all([
-          fetchData<User[]>('/users', {}, []),
+          // Only fetch all users if the current user is an admin. Otherwise, just use the current user.
+          activeUserWithFullProfile.role === 'admin' ? fetchData<User[]>('/users', {}, []) : Promise.resolve([activeUserWithFullProfile]),
           activeUserWithFullProfile.role === 'admin' ? fetchData<PendingUser[]>('/pending-users', {}, []) : Promise.resolve([]),
           fetchData<Task[]>('/tasks', {}, []),
           fetchData<Program[]>('/programs', {}, []),
@@ -430,13 +433,20 @@ export const App = (): JSX.Element => {
       }
       _setCurrentPageInternal(newPage);
 
-      if (currentUser && currentUser.role === 'user' && !localStorage.getItem(`hasCompletedUserTour_${currentUser.id}`)) {
-         setTimeout(() => {
-            const finalCurrentPage = window.location.hash.substring(1).split('?')[0].toUpperCase() as Page | string;
-            if (finalCurrentPage !== Page.Login.toUpperCase() && finalCurrentPage !== Page.PreRegistration.toUpperCase() && Object.values(Page).includes(finalCurrentPage as Page)) {
-                setShowUserTour(true);
-            }
-        }, 500);
+      if (currentUser) {
+        const isNotAuthPage = (page: Page | string) => page !== Page.Login.toUpperCase() && page !== Page.PreRegistration.toUpperCase() && Object.values(Page).includes(page as Page);
+        
+        if (currentUser.role === 'admin' && !localStorage.getItem(`hasCompletedAdminTour_${currentUser.id}`)) {
+          setTimeout(() => {
+            const finalCurrentPage = window.location.hash.substring(1).split('?')[0].toUpperCase();
+            if (isNotAuthPage(finalCurrentPage)) setShowAdminTour(true);
+          }, 500);
+        } else if (currentUser.role === 'user' && !localStorage.getItem(`hasCompletedUserTour_${currentUser.id}`)) {
+          setTimeout(() => {
+            const finalCurrentPage = window.location.hash.substring(1).split('?')[0].toUpperCase();
+            if (isNotAuthPage(finalCurrentPage)) setShowUserTour(true);
+          }, 500);
+        }
       }
     };
 
@@ -632,7 +642,9 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         const targetPage = loggedInUserWithTokenAndOrg.role === 'admin' ? Page.Dashboard : Page.ViewAssignments;
         navigateTo(targetPage); // This might need to be after loadInitialData fully resolves and updates state.
 
-        if (loggedInUserWithTokenAndOrg.role === 'user' && !localStorage.getItem(`hasCompletedUserTour_${loggedInUserWithTokenAndOrg.id}`)) {
+        if (loggedInUserWithTokenAndOrg.role === 'admin' && !localStorage.getItem(`hasCompletedAdminTour_${loggedInUserWithTokenAndOrg.id}`)) {
+          setShowAdminTour(true);
+        } else if (loggedInUserWithTokenAndOrg.role === 'user' && !localStorage.getItem(`hasCompletedUserTour_${loggedInUserWithTokenAndOrg.id}`)) {
           setShowUserTour(true);
         }
       } else {
@@ -1002,519 +1014,725 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     if (!currentUser || !currentUser.organizationId) { setError("Organization context missing."); return; }
     const personIdToAssign = (e.target as HTMLFormElement).assignPerson.value;
     const specificDeadline = (e.target as HTMLFormElement).specificDeadline?.value;
-    if (!selectedTaskForAssignment || !personIdToAssign) { setError("Task and person must be selected."); return; }
-    const task = tasks.find(t => t.id === selectedTaskForAssignment); 
-    const person = users.find(u => u.id === personIdToAssign); 
-    if (!task || !person) { setError("Selected task or person not found in your organization."); return; }
-    if (assignments.some(a => a.taskId === task.id && a.personId === person.id && (a.status === 'pending_acceptance' || a.status === 'accepted_by_user'))) { setError(`${person.displayName} is already assigned this task or pending acceptance.`); return; }
-    const justification = suggestedPersonDisplayName === person.displayName && assignmentSuggestion?.justification ? assignmentSuggestion.justification : 'Manually assigned by admin.';
-    const newAssignmentData: Partial<Omit<Assignment, 'organizationId'>> = { taskId: task.id, personId: person.id, taskTitle: task.title, personName: person.displayName, justification, status: 'pending_acceptance', deadline: specificDeadline || task.deadline, };
+
+    if (!selectedTaskForAssignment) { setError("No task selected for assignment."); return; }
+    if (!personIdToAssign) { setError("No person selected for assignment."); return; }
+
+    const task = tasks.find(t => t.id === selectedTaskForAssignment);
+    const person = users.find(u => u.id === personIdToAssign);
+    if (!task || !person) { setError("Task or person not found."); return; }
+
+    const justification = person.displayName === suggestedPersonDisplayName ? assignmentSuggestion?.justification : "Assigned manually by administrator.";
+
+    const newAssignmentData: Partial<Omit<Assignment, 'id' | 'taskTitle' | 'personName'>> = {
+      taskId: selectedTaskForAssignment,
+      personId: personIdToAssign,
+      justification,
+      status: 'pending_acceptance',
+      deadline: specificDeadline || task.deadline,
+    };
+
     try {
-      const createdAssignment = await fetchData<Assignment>('/assignments', { method: 'POST', body: JSON.stringify(newAssignmentData) });
-      if (createdAssignment && createdAssignment.taskId) {
+      const createdAssignment = await fetchData<Assignment>('/assignments', {
+        method: 'POST',
+        body: JSON.stringify(newAssignmentData),
+      });
+
+      if (createdAssignment && createdAssignment.id) {
         setAssignments(prev => [...prev, createdAssignment]);
         setSuccessMessage(`Task "${task.title}" assigned to ${person.displayName}.`);
-        setSelectedTaskForAssignment(null); setAssignmentSuggestion(null); setAssignmentForm({ specificDeadline: '' });
-        if (person.notificationPreference === 'email' && person.email) { emailService.sendTaskProposalEmail(person.email, person.displayName, task.title, currentUser?.displayName || "Admin", createdAssignment.deadline); }
-        if(currentUser) await addAdminLogEntry(`Admin assigned task "${task.title}" to ${person.displayName}.`);
-      } else { setError("Failed to assign task."); }
-    } catch (err:any) { setError(err.message || "Failed to assign task."); }
-  };
-
-  const updateAssignmentStatus = async (taskId: string, personId: string, newStatus: AssignmentStatus, additionalData: Record<string, any> = {}) => {
-    if (!currentUser && newStatus !== 'pending_acceptance') return null; 
-    if (!currentUser || !currentUser.organizationId) { setError("Organization context missing."); return null;}
-    clearMessages();
-    const payload = { taskId, personId, status: newStatus, ...additionalData };
-    try {
-      const updatedAssignment = await fetchData<Assignment>(`/assignments`, { method: 'PATCH', body: JSON.stringify(payload) });
-      if (updatedAssignment && updatedAssignment.taskId) {
-        setAssignments(prev => prev.map(a => (a.taskId === taskId && a.personId === personId) ? updatedAssignment : a));
-        return updatedAssignment;
-      } else { setError(`Failed to update task status. Server did not confirm.`); return null; }
-    } catch (err:any) { setError(err.message || `Failed to update task status.`); throw err; }
-  };
-
-
-  const handleUserAcceptTask = async (taskId: string) => {
-    if (!currentUser) return;
-    try {
-        const updatedAssignment = await updateAssignmentStatus(taskId, currentUser.id, 'accepted_by_user');
-        if (updatedAssignment) {
-            setSuccessMessage(`Task "${updatedAssignment.taskTitle}" accepted.`);
-            const admin = getAdminToNotify(users.find(u=>u.id === currentUser.referringAdminId)?.id); 
-            if (admin?.notificationPreference === 'email' && admin.email) { emailService.sendTaskStatusUpdateToAdminEmail(admin.email, admin.displayName, currentUser.displayName, updatedAssignment.taskTitle, "accepted"); }
+        if(person.notificationPreference === 'email' && person.email) {
+            emailService.sendTaskProposalEmail(person.email, person.displayName, task.title, currentUser.displayName, newAssignmentData.deadline);
         }
-    } catch (e) { /* error set by updateAssignmentStatus */ }
-  };
-
-  const handleUserDeclineTask = async (taskId: string) => {
-    if (!currentUser) return;
-     try {
-        const updatedAssignment = await updateAssignmentStatus(taskId, currentUser.id, 'declined_by_user');
-         if (updatedAssignment) {
-            setSuccessMessage(`Task "${updatedAssignment.taskTitle}" declined.`);
-            const admin = getAdminToNotify(users.find(u=>u.id === currentUser.referringAdminId)?.id);
-            if (admin?.notificationPreference === 'email' && admin.email) { emailService.sendTaskStatusUpdateToAdminEmail(admin.email, admin.displayName, currentUser.displayName, updatedAssignment.taskTitle, "declined"); }
-        }
-    } catch (e) { /* error set */ }
-  };
-
-  const handleUserSubmitTask = async (taskId: string, delayReason?: string) => {
-    if (!currentUser) return;
-    const assignment = assignments.find(a => a.taskId === taskId && a.personId === currentUser.id && a.status === 'accepted_by_user');
-    if (!assignment) { setError("Task not found or not accepted."); return; }
-    const submissionDate = new Date();
-    let newStatus: AssignmentStatus = 'submitted_on_time';
-    if (assignment.deadline && submissionDate > new Date(assignment.deadline)) {
-      newStatus = 'submitted_late';
-      if (!delayReason && assignmentToSubmitDelayReason === `${assignment.taskId}-${assignment.personId}`) { setError("Reason required for late submission."); return; }
-    }
-    const additionalData: any = { userSubmissionDate: submissionDate.toISOString() };
-    if (newStatus === 'submitted_late') additionalData.userDelayReason = delayReason || userSubmissionDelayReason;
-    try {
-        const updated = await updateAssignmentStatus(taskId, currentUser.id, newStatus, additionalData);
-        if (updated) {
-            setSuccessMessage(`Task "${updated.taskTitle}" submitted.`);
-            setUserSubmissionDelayReason(''); setAssignmentToSubmitDelayReason(null);
-            const admin = getAdminToNotify(users.find(u=>u.id === currentUser.referringAdminId)?.id);
-            if (admin?.notificationPreference === 'email' && admin.email) { emailService.sendTaskStatusUpdateToAdminEmail(admin.email, admin.displayName, currentUser.displayName, updated.taskTitle, `submitted (${newStatus.replace(/_/g, ' ')})`); }
-        }
-    } catch (e) { /* error set */ }
-  };
-
-  const handleAdminApproveTaskCompletion = async (taskId: string, personId: string) => {
-    if (!currentUser || currentUser.role !== 'admin') return;
-     try {
-        const updated = await updateAssignmentStatus(taskId, personId, 'completed_admin_approved');
-        if (updated) {
-            const user = users.find(u => u.id === personId); 
-            setSuccessMessage(`Completion of task "${updated.taskTitle}" by ${user?.displayName || 'user'} approved.`);
-            if (user?.notificationPreference === 'email' && user.email) { emailService.sendTaskCompletionApprovedToUserEmail(user.email, user.displayName, updated.taskTitle, currentUser.displayName); }
-            await addAdminLogEntry(`Admin approved task completion for "${updated.taskTitle}" by ${user?.displayName}.`);
-        }
-    } catch (e) { /* error set */ }
-  };
-
-  const addAdminLogEntry = async (logText: string, imagePreviewUrl?: string) => {
-    if (!currentUser || currentUser.role !== 'admin' || !currentUser.organizationId) return;
-    const newLogData: Omit<AdminLogEntry, 'id' | 'organizationId'> = { adminId: currentUser.id, adminDisplayName: currentUser.displayName, timestamp: new Date().toISOString(), logText, imagePreviewUrl };
-    try {
-        const createdLog = await fetchData<AdminLogEntry>('/admin-logs', { method: 'POST', body: JSON.stringify(newLogData) });
-        if (createdLog?.id) setAdminLogs(prev => [createdLog, ...prev]);
-        else console.error("Failed to save admin log to backend.");
-    } catch (error: any) { console.error("Failed to save admin log:", error); }
-  };
-
-  const handleAdminLogSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!adminLogText.trim() && !adminLogImageFile) { setError("Log text or an image is required."); return; }
-    setIsSubmittingLog(true); clearMessages();
-    let imagePreviewUrl: string | undefined = undefined;
-    if (adminLogImageFile) {
-        try {
-            imagePreviewUrl = await new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result as string);
-                reader.onerror = reject;
-                reader.readAsDataURL(adminLogImageFile);
-            });
-        } catch (error) { setError("Failed to process image file."); setIsSubmittingLog(false); return; }
-    }
-    try {
-        await addAdminLogEntry(adminLogText || `Image log by ${currentUser?.displayName}`, imagePreviewUrl);
-        setSuccessMessage("Admin log entry added.");
-        setAdminLogText(''); setAdminLogImageFile(null);
-        const fileInput = document.getElementById('adminLogImage') as HTMLInputElement; if (fileInput) fileInput.value = '';
-    } catch (err: any) { setError("Failed to submit admin log: " + err.message); }
-    finally { setIsSubmittingLog(false); }
-  };
-
-
-  const handleForgotPassword = async () => {
-    clearMessages();
-    const emailToReset = newLoginForm.email;
-    if (!emailToReset || !/\S+@\S+\.\S+/.test(emailToReset)) { setError("Please enter a valid email address."); return; }
-    try {
-        await fetchData('/users/forgot-password', { method: 'POST', body: JSON.stringify({ email: emailToReset }) });
-        setInfoMessage(`If an account exists for ${emailToReset}, a password reset link has been sent.`);
+        await addAdminLogEntry(`Admin assigned task "${task.title}" to ${person.displayName}.`);
+        setSelectedTaskForAssignment(null);
+        setAssignmentSuggestion(null);
+        setAssignmentForm({ specificDeadline: '' });
+      } else {
+        setError("Failed to create assignment.");
+      }
     } catch (err: any) {
-        console.error("Forgot password API call failed:", err);
-        setInfoMessage(`If an account exists for ${emailToReset}, instructions will be sent. (Error: ${err.message})`);
+      setError(err.message || "Server error while assigning task.");
     }
   };
 
-  const handleCompleteUserTour = (completed: boolean) => {
+
+const handleUpdateAssignmentStatus = async (assignment: Assignment, newStatus: AssignmentStatus, delayReason?: string) => {
+    clearMessages();
+    if (!currentUser) return;
+    try {
+        const updatePayload: any = {
+            taskId: typeof assignment.taskId === 'object' ? (assignment.taskId as Task).id : assignment.taskId,
+            personId: assignment.personId,
+            status: newStatus,
+        };
+        
+        if (newStatus === 'submitted_on_time' || newStatus === 'submitted_late') {
+            updatePayload.userSubmissionDate = new Date().toISOString();
+        }
+        if (newStatus === 'submitted_late' && delayReason) {
+            updatePayload.userDelayReason = delayReason;
+        }
+
+        const updatedAssignment = await fetchData<Assignment>('/assignments', {
+            method: 'PATCH',
+            body: JSON.stringify(updatePayload),
+        });
+
+        if (updatedAssignment) {
+            setAssignments(assignments.map(a => a.id === updatedAssignment.id ? updatedAssignment : a));
+            setSuccessMessage(`Assignment "${assignment.taskTitle}" status updated to: ${formatAssignmentStatus(newStatus)}.`);
+
+            if (currentUser.role === 'admin' && newStatus === 'completed_admin_approved') {
+                const assignedUser = users.find(u => u.id === assignment.personId);
+                if (assignedUser && assignedUser.notificationPreference === 'email' && assignedUser.email) {
+                    emailService.sendTaskCompletionApprovedToUserEmail(assignedUser.email, assignedUser.displayName, assignment.taskTitle, currentUser.displayName);
+                }
+                await addAdminLogEntry(`Admin approved completion for task "${assignment.taskTitle}" by ${assignment.personName}.`);
+            } else if (currentUser.role === 'user') {
+                const adminToNotify = getAdminToNotify();
+                if (adminToNotify && adminToNotify.notificationPreference === 'email' && adminToNotify.email) {
+                    const action = newStatus.includes('accept') ? 'accepted' : newStatus.includes('decline') ? 'declined' : 'submitted';
+                    emailService.sendTaskStatusUpdateToAdminEmail(adminToNotify.email, adminToNotify.displayName, currentUser.displayName, assignment.taskTitle, action);
+                }
+                 await addAdminLogEntry(`User ${currentUser.displayName} ${newStatus.replace(/_/g, ' ')} task: ${assignment.taskTitle}.`);
+            }
+        } else {
+            setError("Failed to update assignment status.");
+        }
+    } catch (err:any) {
+        setError(err.message || "Error updating assignment status.");
+    } finally {
+        setAssignmentToSubmitDelayReason(null);
+        setUserSubmissionDelayReason('');
+    }
+};
+
+  const addAdminLogEntry = async (logText: string, imageFile?: File | null) => {
+    if (!currentUser || currentUser.role !== 'admin') return;
+
+    let imagePreviewUrl: string | undefined = undefined;
+    // Note: Image upload to a service (like S3, Cloudinary) would happen here.
+    // For this app, we're assuming the backend might just store a placeholder or log text.
+    // If you implement file uploads, the backend would return a URL to save.
+    if(imageFile) {
+        // Placeholder for image upload logic
+        console.warn("Image upload simulation: In a real app, this file would be uploaded to a cloud storage service.");
+        // We'll use a local object URL for immediate preview, but this isn't persistent.
+        // A real implementation needs backend upload handling.
+        imagePreviewUrl = URL.createObjectURL(imageFile); // For local preview only.
+    }
+    
+    setIsSubmittingLog(true);
+    try {
+      const newLog = await fetchData<AdminLogEntry>('/admin-logs', {
+        method: 'POST',
+        body: JSON.stringify({ logText, imagePreviewUrl }), // In real app, send actual URL from storage
+      });
+
+      if (newLog) {
+        setAdminLogs([newLog, ...adminLogs]);
+        setAdminLogText('');
+        setAdminLogImageFile(null);
+      }
+    } catch (err: any) {
+      setError(`Failed to add admin log: ${err.message}`);
+    } finally {
+        setIsSubmittingLog(false);
+    }
+  };
+
+  const handleTourClose = (completed: boolean) => {
     setShowUserTour(false);
     if (currentUser) {
-        localStorage.setItem(`hasCompletedUserTour_${currentUser.id}`, 'true');
-        if (completed) setSuccessMessage("Great! You've completed the tour.");
-        else setInfoMessage("Tour skipped.");
+      localStorage.setItem(`hasCompletedUserTour_${currentUser.id}`, 'true');
+      if (completed) {
+        setSuccessMessage("You've completed the tour! You can now explore the application.");
+      }
+    }
+  };
+
+  const handleAdminTourClose = (completed: boolean) => {
+    setShowAdminTour(false);
+    if (currentUser) {
+      localStorage.setItem(`hasCompletedAdminTour_${currentUser.id}`, 'true');
+      if (completed) {
+        setSuccessMessage("You've completed the admin tour! You can now manage your organization.");
+      }
     }
   };
 
 
-  if (isLoadingAppData && !localStorage.getItem(JWT_TOKEN_KEY)) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-bground p-4">
-        <LoadingSpinner />
-        <p className="mt-4 text-textlight">Loading application...</p>
-        {error && <div className="mt-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-md shadow-lg max-w-md w-full" role="alert"><p><strong className="font-bold">Error:</strong> {error}</p></div>}
-      </div>
-    );
-  }
+  const formatAssignmentStatus = (status: AssignmentStatus): string => {
+    return status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+  };
 
-  const UIMessages: React.FC = () => (
-    <>
-      {error && <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-md shadow-lg w-full" role="alert"><p><strong className="font-bold">Error:</strong> {error}</p><button onClick={clearMessages} className="ml-2 text-sm font-bold">X</button></div>}
-      {successMessage && <div className="mb-4 p-3 bg-green-100 border-green-400 text-green-700 rounded-md shadow-lg w-full" role="alert"><p>{successMessage}</p><button onClick={clearMessages} className="ml-2 text-sm font-bold">X</button></div>}
-      {infoMessage && <div className="mb-4 p-3 bg-blue-100 border-blue-400 text-blue-700 rounded-md shadow-lg w-full" role="status"><p>{infoMessage}</p><button onClick={clearMessages} className="ml-2 text-sm font-bold">X</button></div>}
-    </>
-  );
-
-  if (isLoadingAppData && !currentUser && localStorage.getItem(JWT_TOKEN_KEY)) { 
-     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-bground p-4">
-        <LoadingSpinner />
-        <p className="mt-4 text-textlight">Authenticating...</p>
-      </div>
-    );
-  }
-
-
-  if (!currentUser || currentPage === Page.Login || currentPage === Page.PreRegistration) {
-    if (currentPage === Page.PreRegistration) {
-      return (
-        <PreRegistrationFormPage
-          formState={preRegistrationForm}
-          setFormState={setPreRegistrationForm}
-          onSubmit={handlePreRegistrationSubmit}
-          error={error}
-          successMessage={successMessage}
-          infoMessage={infoMessage}
-          clearMessages={clearMessages}
-          navigateToLogin={() => navigateTo(Page.Login)}
-          isVerifyingLink={isVerifyingLink}
-        />
-      );
+  const getStatusColorClass = (status: AssignmentStatus): string => {
+    switch (status) {
+      case 'pending_acceptance': return 'text-amber-600 bg-amber-100';
+      case 'accepted_by_user': return 'text-blue-600 bg-blue-100';
+      case 'declined_by_user': return 'text-red-600 bg-red-100';
+      case 'submitted_on_time':
+      case 'submitted_late': return 'text-purple-600 bg-purple-100';
+      case 'completed_admin_approved': return 'text-green-600 bg-green-100';
+      default: return 'text-gray-600 bg-gray-100';
     }
+  };
 
+  const renderAssignmentItem = (assignment: Assignment, task: Task, userForRender: User) => {
+    const isLateSubmission = assignment.status === 'submitted_on_time' && assignment.deadline && assignment.userSubmissionDate && new Date(assignment.userSubmissionDate) > new Date(assignment.deadline);
+    if (isLateSubmission && assignment.status === 'submitted_on_time') { // Correct the status if it was miscategorized
+        assignment.status = 'submitted_late';
+    }
+    
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-authPageBg p-4 main-app-scope">
-        {isLoadingAppData && localStorage.getItem(JWT_TOKEN_KEY) && <div className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-50 flex items-center justify-center z-50"><LoadingSpinner /><p className="text-white ml-2">Loading...</p></div>}
-        <div className="bg-surface p-8 rounded-xl shadow-2xl w-full max-w-md">
-          <UIMessages />
-          <h2 className="text-3xl font-bold text-textlight mb-6 text-center">
-            Task Assignment Assistant
-          </h2>
+        <li key={assignment.id} className="p-4 sm:p-6 hover:bg-gray-50 transition-colors">
+            <div className="flex items-start justify-between flex-wrap gap-4">
+                <div className="flex-grow">
+                    <h3 className="text-lg font-semibold text-primary">{assignment.taskTitle}</h3>
+                    {currentUser?.role === 'admin' && (
+                        <p className="text-sm text-neutral">To: <span className="font-medium text-textlight">{userForRender.displayName}</span></p>
+                    )}
+                    <p className="text-sm mt-1">
+                        <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusColorClass(assignment.status)}`}>
+                            {formatAssignmentStatus(assignment.status)}
+                        </span>
+                    </p>
+                    {assignment.deadline && <p className="text-sm text-neutral mt-2">Deadline: <span className="font-medium text-textlight">{new Date(assignment.deadline).toLocaleDateString()}</span></p>}
+                    
+                    <details className="mt-3 text-sm">
+                        <summary className="cursor-pointer text-texthighlight hover:underline">View Details</summary>
+                        <div className="mt-2 pl-4 border-l-2 border-bground space-y-2">
+                           <p><strong className="font-medium text-textlight">Description:</strong> {task.description}</p>
+                           <p><strong className="font-medium text-textlight">Required Skills:</strong> {task.requiredSkills}</p>
+                           {assignment.justification && <p><strong className="font-medium text-textlight">AI Justification:</strong> <span className="italic">{assignment.justification}</span></p>}
+                           {assignment.status === 'submitted_late' && assignment.userDelayReason && <p><strong className="font-medium text-danger">Delay Reason:</strong> {assignment.userDelayReason}</p>}
+                        </div>
+                    </details>
+                </div>
 
-          {authView === 'login' ? (
-            <form onSubmit={handleLogin} className="space-y-5">
-              <h3 className="text-xl font-semibold text-textlight mb-4">Login</h3>
-              <div>
-                <label htmlFor="loginEmail" className="block text-sm font-medium text-textlight">Email Address</label>
-                <AuthFormInput type="email" id="loginEmail" aria-label="Email for login" placeholder="you@example.com" value={newLoginForm.email} onChange={(e) => setNewLoginForm({ ...newLoginForm, email: e.target.value })} required autoComplete="email" />
-              </div>
-              <div>
-                <label htmlFor="loginPassword" className="block text-sm font-medium text-textlight">Password</label>
-                <AuthFormInput type="password" id="loginPassword" aria-label="Password for login" placeholder="Enter your password" value={newLoginForm.password} onChange={(e) => setNewLoginForm({ ...newLoginForm, password: e.target.value })} required autoComplete="current-password" />
-              </div>
-              <button type="submit" className="w-full py-3 px-4 bg-authButton hover:bg-authButtonHover text-textlight font-semibold rounded-md shadow-sm transition-colors text-sm" disabled={isLoadingAppData && !!localStorage.getItem(JWT_TOKEN_KEY)}>
-                {(isLoadingAppData && !!localStorage.getItem(JWT_TOKEN_KEY)) ? <LoadingSpinner /> : 'Sign In'}
-              </button>
-              <div className="text-sm text-center"> <button type="button" onClick={handleForgotPassword} className="font-medium text-authLink hover:underline"> Forgot password? </button> </div>
-            </form>
-          ) : (
-            <form onSubmit={handleNewRegistration} className="space-y-5">
-              <h3 className="text-xl font-semibold text-textlight mb-4">Register New Account</h3>
-              <div> <label htmlFor="regName" className="block text-sm font-medium text-textlight">Full Name</label> <AuthFormInput type="text" id="regName" aria-label="Full name for registration" placeholder="Your Full Name" value={newRegistrationForm.name} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, name: e.target.value })} required autoComplete="name" /> </div>
-              <div> <label htmlFor="regEmail" className="block text-sm font-medium text-textlight">Email Address</label> <AuthFormInput type="email" id="regEmail" aria-label="Email for registration" placeholder="you@example.com" value={newRegistrationForm.email} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, email: e.target.value })} required autoComplete="email" /> </div>
-              <div> <label htmlFor="regUniqueId" className="block text-sm font-medium text-textlight">System ID / Username</label> <AuthFormInput type="text" id="regUniqueId" aria-label="System ID for registration" placeholder="Create a unique ID" value={newRegistrationForm.uniqueId} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, uniqueId: e.target.value })} required /> </div>
-              <div> <label htmlFor="regPassword" className="block text-sm font-medium text-textlight">Password</label> <AuthFormInput type="password" id="regPassword" aria-label="Password for registration" placeholder="Create a password" value={newRegistrationForm.password} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, password: e.target.value })} required autoComplete="new-password" aria-describedby="passwordHelpReg"/> <p id="passwordHelpReg" className="mt-1 text-xs text-neutral">{passwordRequirementsText}</p> </div>
-              <div> <label htmlFor="regConfirmPassword" className="block text-sm font-medium text-textlight">Confirm Password</label> <AuthFormInput type="password" id="regConfirmPassword" aria-label="Confirm password for registration" placeholder="Confirm your password" value={newRegistrationForm.confirmPassword} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, confirmPassword: e.target.value })} required autoComplete="new-password" /> </div>
-              
-              <div>
-                <label htmlFor="regRole" className="block text-sm font-medium text-textlight">Register as</label>
-                <AuthFormSelect id="regRole" aria-label="Select role for registration" value={newRegistrationForm.role} onChange={(e) => setNewRegistrationForm({...newRegistrationForm, role: e.target.value as Role})}>
-                  <option value="user">User (requires referral/invitation)</option>
-                  <option value="admin">Administrator (creates a new site)</option>
-                </AuthFormSelect>
-              </div>
-              {newRegistrationForm.role === 'admin' && (
-                <div> <label htmlFor="regOrgName" className="block text-sm font-medium text-textlight">Organization/Site Name</label> <AuthFormInput type="text" id="regOrgName" aria-label="Organization or Site Name" placeholder="Your Organization Name" value={newRegistrationForm.organizationName} onChange={(e) => setNewRegistrationForm({ ...newRegistrationForm, organizationName: e.target.value })} required /> <small className="text-xs text-gray-500">This will be the name of your new, separate site.</small> </div>
-              )}
-               <small className="text-xs text-gray-500">
-                  {newRegistrationForm.role === 'admin' ? "Registering as an Administrator creates a new, isolated site." : 
-                   "User accounts are typically created via pre-registration links from an existing site administrator."}
-                </small>
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-shrink-0">
+                    {currentUser?.id === assignment.personId && assignment.status === 'pending_acceptance' && (
+                        <>
+                            <button onClick={() => handleUpdateAssignmentStatus(assignment, 'accepted_by_user')} className="btn-success text-xs px-3 py-1.5">Accept Task</button>
+                            <button onClick={() => handleUpdateAssignmentStatus(assignment, 'declined_by_user')} className="btn-danger text-xs px-3 py-1.5">Decline Task</button>
+                        </>
+                    )}
+                    {currentUser?.id === assignment.personId && assignment.status === 'accepted_by_user' && (
+                        <>
+                         {assignment.deadline && new Date() > new Date(assignment.deadline) ? (
+                            <button onClick={() => setAssignmentToSubmitDelayReason(assignment.id)} className="btn-warning text-xs px-3 py-1.5">Submit (Late)</button>
+                         ) : (
+                            <button onClick={() => handleUpdateAssignmentStatus(assignment, 'submitted_on_time')} className="btn-primary text-xs px-3 py-1.5">Mark as Completed / Submit</button>
+                         )}
+                        </>
+                    )}
+                     {currentUser?.role === 'admin' && (assignment.status === 'submitted_on_time' || assignment.status === 'submitted_late') && (
+                        <button onClick={() => handleUpdateAssignmentStatus(assignment, 'completed_admin_approved')} className="btn-success text-xs px-3 py-1.5">Approve Completion</button>
+                    )}
+                </div>
+            </div>
+             {assignmentToSubmitDelayReason === assignment.id && (
+                <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-md">
+                    <FormTextarea
+                        id={`delay-reason-${assignment.id}`}
+                        label="Reason for Late Submission (Required)"
+                        value={userSubmissionDelayReason}
+                        onChange={(e) => setUserSubmissionDelayReason(e.target.value)}
+                        placeholder="Please briefly explain the reason for the delay."
+                    />
+                    <div className="mt-2 flex gap-2">
+                        <button onClick={() => handleUpdateAssignmentStatus(assignment, 'submitted_late', userSubmissionDelayReason)} className="btn-warning text-xs px-3 py-1.5" disabled={!userSubmissionDelayReason.trim()}>Confirm Submission</button>
+                        <button onClick={() => setAssignmentToSubmitDelayReason(null)} className="btn-neutral text-xs px-3 py-1.5">Cancel</button>
+                    </div>
+                </div>
+            )}
+        </li>
+    );
+};
 
 
-              <button type="submit" className="w-full py-3 px-4 bg-authButton hover:bg-authButtonHover text-textlight font-semibold rounded-md shadow-sm transition-colors text-sm" disabled={isLoadingAppData && !!localStorage.getItem(JWT_TOKEN_KEY)}>
-                {(isLoadingAppData && !!localStorage.getItem(JWT_TOKEN_KEY)) ? <LoadingSpinner/> : 'Register'}
-              </button>
-            </form>
-          )}
-          <p className="text-center text-sm text-textlight mt-6">
-            {authView === 'login' ? "Don't have an account?" : "Already have an account?"}{' '}
-            <button type="button" onClick={() => { clearMessages(); setAuthView(authView === 'login' ? 'register' : 'login'); }} className="font-medium text-authLink hover:underline">
-              {authView === 'login' ? 'Register here' : 'Sign in here'}
-            </button>
-          </p>
-        </div>
-        <footer className="text-center py-6 text-sm text-neutral mt-auto">
-          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by SHAIK MOAHAMMED NAWAZ.</p>
-        </footer>
+  // --- Main Render Logic ---
+
+  if (isLoadingAppData && !currentUser) { // Show loading screen on initial app load, especially if checking for a token
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-bground">
+        <LoadingSpinner />
       </div>
     );
+  }
+
+
+  if (!currentUser) {
+    const commonAuthProps = {
+      error, successMessage, infoMessage, clearMessages
+    };
+
+    switch (currentPage) {
+        case Page.PreRegistration:
+            return <PreRegistrationFormPage 
+                        formState={preRegistrationForm}
+                        setFormState={setPreRegistrationForm}
+                        onSubmit={handlePreRegistrationSubmit}
+                        navigateToLogin={() => navigateTo(Page.Login)}
+                        isVerifyingLink={isVerifyingLink}
+                        {...commonAuthProps}
+                   />
+        default: // Default to Login page
+         return (
+            <div className="min-h-screen flex flex-col items-center justify-center bg-authPageBg p-4">
+            <div className="bg-surface p-8 rounded-xl shadow-2xl w-full max-w-md">
+                 {error && <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-md shadow-lg w-full" role="alert"><p><strong className="font-bold">Error:</strong> {error}</p><button onClick={clearMessages} className="ml-2 text-sm font-bold">X</button></div>}
+                 {successMessage && <div className="mb-4 p-3 bg-green-100 border-green-400 text-green-700 rounded-md shadow-lg w-full" role="alert"><p>{successMessage}</p><button onClick={clearMessages} className="ml-2 text-sm font-bold">X</button></div>}
+                 {infoMessage && <div className="mb-4 p-3 bg-blue-100 border-blue-400 text-blue-700 rounded-md shadow-lg w-full" role="status"><p>{infoMessage}</p><button onClick={clearMessages} className="ml-2 text-sm font-bold">X</button></div>}
+
+                 <h2 className="text-center text-3xl font-bold text-textlight mb-2">{authView === 'login' ? 'Welcome Back!' : 'Create Your Account'}</h2>
+                 <p className="text-center text-sm text-neutral mb-6">{authView === 'login' ? 'Sign in to access your dashboard.' : 'Register to get started.'}</p>
+                 {authView === 'login' ? (
+                     <form onSubmit={handleLogin} className="space-y-5">
+                          <AuthFormInput id="loginEmail" name="email" type="email" value={newLoginForm.email} onChange={(e) => setNewLoginForm({...newLoginForm, email: e.target.value})} required autoComplete="email" placeholder="you@example.com" aria-label="Email Address" />
+                          <AuthFormInput id="loginPassword" name="password" type="password" value={newLoginForm.password} onChange={(e) => setNewLoginForm({...newLoginForm, password: e.target.value})} required autoComplete="current-password" placeholder="Password" aria-label="Password" />
+                          <button type="submit" className="w-full py-3 px-4 bg-authButton hover:bg-authButtonHover text-textlight font-semibold rounded-md shadow-sm transition-colors text-sm">Sign In</button>
+                          <p className="text-center text-sm text-textlight">
+                            Don't have an account?{' '}
+                            <button type="button" onClick={() => { setAuthView('register'); clearMessages(); }} className="font-medium text-authLink hover:underline">Register here</button>
+                          </p>
+                     </form>
+                 ) : (
+                    <form onSubmit={handleNewRegistration} className="space-y-4">
+                        <AuthFormInput id="regName" name="name" type="text" value={newRegistrationForm.name} onChange={(e) => setNewRegistrationForm({...newRegistrationForm, name: e.target.value})} required placeholder="Your Full Name" aria-label="Full Name" />
+                        <AuthFormInput id="regEmail" name="email" type="email" value={newRegistrationForm.email} onChange={(e) => setNewRegistrationForm({...newRegistrationForm, email: e.target.value})} required autoComplete="email" placeholder="Your Email Address" aria-label="Email Address" />
+                        <AuthFormInput id="regUniqueId" name="uniqueId" type="text" value={newRegistrationForm.uniqueId} onChange={(e) => setNewRegistrationForm({...newRegistrationForm, uniqueId: e.target.value})} required placeholder="Desired System ID (e.g. jdoe23)" aria-label="System ID" />
+                        <AuthFormInput id="regPassword" name="password" type="password" value={newRegistrationForm.password} onChange={(e) => setNewRegistrationForm({...newRegistrationForm, password: e.target.value})} required autoComplete="new-password" placeholder="Create Password" aria-label="Password" aria-describedby="passwordHelp" />
+                        <p id="passwordHelp" className="mt-1 text-xs text-neutral -pt-2">{passwordRequirementsText}</p>
+                        <AuthFormInput id="regConfirmPassword" name="confirmPassword" type="password" value={newRegistrationForm.confirmPassword} onChange={(e) => setNewRegistrationForm({...newRegistrationForm, confirmPassword: e.target.value})} required autoComplete="new-password" placeholder="Confirm Password" aria-label="Confirm Password" />
+                        
+                        <div className="border-t border-gray-200 pt-4">
+                            <AuthFormSelect id="regRole" name="role" value={newRegistrationForm.role} onChange={(e) => setNewRegistrationForm({...newRegistrationForm, role: e.target.value as Role})} aria-label="Select Role">
+                                <option value="user">Register as a standard User</option>
+                                <option value="admin">Register as an Admin (creates a new site)</option>
+                            </AuthFormSelect>
+                        </div>
+
+                        {newRegistrationForm.role === 'admin' && (
+                          <AuthFormInput id="regOrgName" name="organizationName" type="text" value={newRegistrationForm.organizationName} onChange={(e) => setNewRegistrationForm({...newRegistrationForm, organizationName: e.target.value})} required placeholder="Your Organization's Name" aria-label="Organization Name" />
+                        )}
+
+                        <button type="submit" className="w-full py-3 px-4 bg-authButton hover:bg-authButtonHover text-textlight font-semibold rounded-md shadow-sm transition-colors text-sm">Register</button>
+                        <p className="text-center text-sm text-textlight">
+                            Already have an account?{' '}
+                             <button type="button" onClick={() => { setAuthView('login'); clearMessages(); }} className="font-medium text-authLink hover:underline">Sign in</button>
+                        </p>
+                    </form>
+                 )}
+             </div>
+              <footer className="text-center py-6 text-sm text-neutral mt-auto">
+                <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by AI.</p>
+              </footer>
+            </div>
+        );
+    }
+  }
+
+  // --- Logged-in App View ---
+  let pageContent;
+  switch (currentPage) {
+    case Page.Dashboard:
+       const stats = {
+            users: users.filter(u => u.role === 'user').length,
+            pendingApprovals: pendingUsers.length,
+            tasks: tasks.length,
+            programs: programs.length,
+            activeAssignments: assignments.filter(a => a.status === 'accepted_by_user').length,
+            completedTasks: assignments.filter(a => a.status === 'completed_admin_approved').length,
+        };
+      pageContent = (
+        <div className="p-4 sm:p-6 lg:p-8">
+            <h2 className="text-2xl font-bold text-textlight mb-6">Admin Dashboard</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {Object.entries({
+                    "Users": {value: stats.users, desc: "Total active users in your organization"},
+                    "Pending Approvals": {value: stats.pendingApprovals, desc: "Users awaiting approval in your organization"},
+                    "Tasks": {value: stats.tasks, desc: "Total defined tasks in your organization"},
+                    "Programs": {value: stats.programs, desc: "Total programs in your organization"},
+                    "Active Assignments": {value: stats.activeAssignments, desc: "Tasks currently assigned in your organization"},
+                    "Completed Tasks": {value: stats.completedTasks, desc: "Successfully finished tasks in your organization"},
+                }).map(([key, {value, desc}]) => (
+                    <div key={key} className="bg-surface rounded-lg shadow-md p-5">
+                        <h3 className="text-sm font-medium text-neutral">{key}</h3>
+                        <p className="mt-1 text-3xl font-semibold text-textlight">{value}</p>
+                        <p className="text-xs text-neutral mt-1">{desc}</p>
+                    </div>
+                ))}
+            </div>
+
+             <div className="mt-8 bg-surface rounded-lg shadow-md p-5">
+                <h3 className="text-lg font-semibold text-textlight mb-4">Admin Log Entry</h3>
+                <div className="space-y-4">
+                  <FormTextarea
+                    id="admin-log"
+                    label="Log Message"
+                    value={adminLogText}
+                    onChange={(e) => setAdminLogText(e.target.value)}
+                    placeholder="Enter log details..."
+                  />
+                  <div>
+                    <label htmlFor="admin-log-image" className="block text-sm font-medium text-textlight">Attach Image (Optional)</label>
+                    <input
+                      id="admin-log-image"
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => setAdminLogImageFile(e.target.files ? e.target.files[0] : null)}
+                      className="mt-1 block w-full text-sm text-neutral file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-bground file:text-primary hover:file:bg-blue-100"
+                    />
+                  </div>
+                  <button onClick={() => addAdminLogEntry(adminLogText, adminLogImageFile)} className="btn-primary" disabled={isSubmittingLog || (!adminLogText.trim() && !adminLogImageFile)}>
+                    {isSubmittingLog ? "Submitting..." : "Add Log Entry"}
+                  </button>
+                </div>
+            </div>
+
+            <div className="mt-8 bg-surface rounded-lg shadow-md">
+                 <h3 className="text-lg font-semibold text-textlight mb-4 p-5 border-b border-bground">Recent Admin Logs (Your Organization)</h3>
+                <ul className="divide-y divide-bground">
+                    {adminLogs.length > 0 ? adminLogs.slice(0, 10).map(log => (
+                        <li key={log.id} className="p-5">
+                            <p className="text-sm text-textlight">{log.logText}</p>
+                            <p className="text-xs text-neutral mt-1">
+                                By <span className="font-medium">{log.adminDisplayName}</span> on {new Date(log.timestamp).toLocaleString()}
+                            </p>
+                        </li>
+                    )) : (
+                        <li className="p-5 text-sm text-neutral">No admin logs for your organization.</li>
+                    )}
+                </ul>
+            </div>
+        </div>
+      );
+      break;
+    case Page.UserProfile:
+       pageContent = (
+        <div className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto">
+          <h2 className="text-2xl font-bold text-textlight mb-4">My Profile</h2>
+          <form onSubmit={handleUpdateProfile} className="bg-surface rounded-lg shadow p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <FormInput label="Display Name" id="profileDisplayName" value={userForm.displayName} onChange={e => setUserForm({...userForm, displayName: e.target.value})} required />
+            <FormInput label="System ID / Username" id="profileUniqueId" value={userForm.uniqueId} onChange={e => setUserForm({...userForm, uniqueId: e.target.value})} required />
+            <FormInput label="Email Address" id="profileEmail" value={userForm.email} type="email" disabled readOnly className="bg-gray-100" description="Email cannot be changed." />
+            <FormInput label="Position / Title" id="profilePosition" value={userForm.position} onChange={e => setUserForm({...userForm, position: e.target.value})} required />
+            <div className="md:col-span-2">
+              <FormTextarea label="My Skills & Interests" id="profileInterests" value={userForm.userInterests} onChange={e => setUserForm({...userForm, userInterests: e.target.value})} />
+            </div>
+            <FormInput label="Phone Number" id="profilePhone" value={userForm.phone} type="tel" onChange={e => setUserForm({...userForm, phone: e.target.value})} />
+            <FormSelect label="Notification Preference" id="profileNotification" value={userForm.notificationPreference} onChange={e => setUserForm({...userForm, notificationPreference: e.target.value as NotificationPreference})}>
+              <option value="email">Email</option><option value="phone">Phone (SMS)</option><option value="none">None</option>
+            </FormSelect>
+             <div className="md:col-span-2 border-t pt-6 mt-4">
+               <h3 className="text-lg font-semibold text-textlight mb-2">Change Password</h3>
+               <p className="text-sm text-neutral mb-4">Leave fields blank to keep your current password.</p>
+                <FormInput label="New Password" id="profilePassword" type="password" value={userForm.password} onChange={e => setUserForm({...userForm, password: e.target.value})} aria-describedby="passwordHelpProfile" />
+                <p id="passwordHelpProfile" className="text-xs text-neutral mt-1">{passwordRequirementsText}</p>
+                <FormInput label="Confirm New Password" id="profileConfirmPassword" type="password" value={userForm.confirmPassword} onChange={e => setUserForm({...userForm, confirmPassword: e.target.value})} />
+            </div>
+            <div className="md:col-span-2 flex justify-end">
+              <button type="submit" className="btn-primary">Update Profile</button>
+            </div>
+          </form>
+        </div>
+      );
+      break;
+    case Page.ViewAssignments:
+        pageContent = (
+            <div className="p-4 sm:p-6 lg:p-8">
+                <h2 className="text-2xl font-bold text-textlight mb-4">My Assignments</h2>
+                <div className="bg-surface rounded-lg shadow">
+                    <ul className="divide-y divide-gray-200">
+                        {assignments.map(assignment => {
+                            // The backend populates taskId with a partial task object. We cast it to use it directly.
+                            const task = assignment.taskId as Task;
+                            // Find the full user object if available.
+                            const user = users.find(u => u.id === assignment.personId);
+
+                            if (!task) {
+                                // This should not happen if the backend is working correctly, as it filters these out.
+                                return (
+                                    <li key={assignment.id || `${assignment.personId}-no-task`} className="p-4 text-sm text-neutral">
+                                        Assignment data is incomplete. Task details are missing for assignment to {assignment.personName}.
+                                    </li>
+                                );
+                            }
+
+                            // Create a synthetic user object for rendering if the full object isn't in our state.
+                            const userForRender: User = user || {
+                                id: assignment.personId,
+                                displayName: assignment.personName,
+                                email: '', uniqueId: '', role: 'user', position: '',
+                                organizationId: currentUser!.organizationId
+                            };
+
+                            return renderAssignmentItem(assignment, task, userForRender);
+                        })}
+                        {assignments.length === 0 && (
+                            <li className="p-4 text-sm text-neutral">
+                                {currentUser?.role === 'admin' ? "No assignments found in your organization." : "No tasks are currently assigned to you."}
+                            </li>
+                        )}
+                    </ul>
+                </div>
+            </div>
+        );
+        break;
+    case Page.ViewTasks:
+       pageContent = (
+         <div className="p-4 sm:p-6 lg:p-8">
+            <h2 className="text-2xl font-bold text-textlight mb-4">Available Tasks</h2>
+             <div className="bg-surface rounded-lg shadow">
+               <ul className="divide-y divide-gray-200">
+                {tasks.length > 0 ? tasks.map(task => (
+                    <li key={task.id} className="p-4 sm:p-6">
+                         <h3 className="text-lg font-semibold text-primary">{task.title}</h3>
+                         <p className="text-sm text-neutral mt-1">Related Program: <span className="font-medium text-textlight">{task.programName || 'N/A'}</span></p>
+                         <details className="mt-3 text-sm">
+                            <summary className="cursor-pointer text-texthighlight hover:underline">View Details</summary>
+                             <div className="mt-2 pl-4 border-l-2 border-bground space-y-2">
+                                <p><strong className="font-medium text-textlight">Description:</strong> {task.description}</p>
+                                <p><strong className="font-medium text-textlight">Required Skills:</strong> {task.requiredSkills}</p>
+                                {task.deadline && <p><strong className="font-medium text-textlight">Suggested Deadline:</strong> {new Date(task.deadline).toLocaleDateString()}</p>}
+                            </div>
+                        </details>
+                    </li>
+                )) : (
+                    <li className="p-4 text-sm text-neutral">No tasks are currently available.</li>
+                )}
+               </ul>
+            </div>
+         </div>
+       );
+      break;
+    case Page.UserManagement:
+       pageContent = (
+         <div className="p-4 sm:p-6 lg:p-8">
+            <h2 className="text-2xl font-bold text-textlight mb-4">User Management</h2>
+            {/* Form for Creating/Editing Users */}
+            {(editingUserId !== null || approvingPendingUser !== null || userForm.id === 'creating') && (
+                 <div className="bg-surface rounded-lg shadow p-6 mb-8">
+                    <h3 className="text-xl font-semibold text-textlight mb-4">
+                        {editingUserId ? "Edit User" : approvingPendingUser ? `Approve Pending User: ${approvingPendingUser.displayName}` : "Create New User"}
+                    </h3>
+                     <form onSubmit={editingUserId ? handleAdminUpdateUser : handleCreateUserByAdmin} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                         <FormInput label="Display Name" id="userFormDisplayName" value={userForm.displayName} onChange={e => setUserForm({...userForm, displayName: e.target.value})} required disabled={!!approvingPendingUser} />
+                         <FormInput label="Email Address" id="userFormEmail" value={userForm.email} type="email" onChange={e => setUserForm({...userForm, email: e.target.value})} required disabled={!!approvingPendingUser || !!editingUserId} />
+                         <FormInput label="System ID / Username" id="userFormUniqueId" value={userForm.uniqueId} onChange={e => setUserForm({...userForm, uniqueId: e.target.value})} required disabled={!!approvingPendingUser || !!editingUserId} />
+                         <FormInput label="Position / Title" id="userFormPosition" value={userForm.position} onChange={e => setUserForm({...userForm, position: e.target.value})} required />
+                         <div className="md:col-span-2">
+                            <FormTextarea label="User Skills & Interests" id="userFormInterests" value={userForm.userInterests} onChange={e => setUserForm({...userForm, userInterests: e.target.value})} />
+                         </div>
+                         <FormInput label="Phone Number" id="userFormPhone" value={userForm.phone} type="tel" onChange={e => setUserForm({...userForm, phone: e.target.value})} />
+                         <FormSelect label="Notification Preference" id="userFormNotification" value={userForm.notificationPreference} onChange={e => setUserForm({...userForm, notificationPreference: e.target.value as NotificationPreference})}>
+                             <option value="email">Email</option><option value="phone">Phone (SMS)</option><option value="none">None</option>
+                         </FormSelect>
+                         <FormSelect label="Role" id="userFormRole" value={userForm.role} onChange={e => setUserForm({...userForm, role: e.target.value as Role})}>
+                             <option value="user">User</option><option value="admin">Admin</option>
+                         </FormSelect>
+                         {!editingUserId && (
+                             <div className="md:col-span-2 border-t pt-6 mt-4">
+                                <h4 className="text-lg font-semibold text-textlight mb-2">{editingUserId ? "Change Password (Optional)" : "Set Initial Password"}</h4>
+                                <FormInput label="Password" id="userFormPassword" type="password" value={userForm.password} onChange={e => setUserForm({...userForm, password: e.target.value})} required={!editingUserId} aria-describedby="passwordHelpUserMgmt" />
+                                <p id="passwordHelpUserMgmt" className="text-xs text-neutral mt-1">{passwordRequirementsText}</p>
+                                <FormInput label="Confirm Password" id="userFormConfirmPassword" type="password" value={userForm.confirmPassword} onChange={e => setUserForm({...userForm, confirmPassword: e.target.value})} required={!editingUserId} />
+                             </div>
+                         )}
+                         <div className="md:col-span-2 flex justify-end gap-3">
+                              <button type="button" onClick={() => { setEditingUserId(null); setApprovingPendingUser(null); setUserForm(initialUserFormData); }} className="btn-neutral">Cancel</button>
+                              {approvingPendingUser ? (
+                                <button type="button" onClick={handleApprovePendingUser} className="btn-success">Approve User</button>
+                              ) : (
+                                <button type="submit" className="btn-primary">{editingUserId ? 'Save Changes' : 'Create User'}</button>
+                              )}
+                         </div>
+                     </form>
+                 </div>
+            )}
+            {/* Pre-registration Link Section */}
+            <div className="bg-surface rounded-lg shadow p-6 mb-8">
+                 <h3 className="text-xl font-semibold text-textlight mb-2">Pre-registration Link</h3>
+                 <p className="text-sm text-neutral mb-4">Generate a unique link to allow a new user to register for your organization. They will require your approval after they submit their details.</p>
+                 <button onClick={handleGeneratePreRegistrationLink} className="btn-secondary">Generate Link</button>
+                 {generatedLink && (
+                     <div className="mt-4 p-3 bg-bground rounded-md">
+                         <p className="text-sm text-textlight break-all">{generatedLink}</p>
+                         <button onClick={() => copyToClipboard(generatedLink)} className="mt-2 text-sm text-primary font-medium hover:underline">Copy to Clipboard</button>
+                     </div>
+                 )}
+            </div>
+
+            {/* Pending Users List */}
+            <div className="bg-surface rounded-lg shadow mb-8">
+              <h3 className="text-xl font-semibold text-textlight p-4 border-b">Pending Approvals</h3>
+               <ul className="divide-y divide-gray-200">
+                  {pendingUsers.length > 0 ? pendingUsers.map(pu => (
+                      <li key={pu.id} className="p-4 flex items-center justify-between">
+                         <div>
+                           <p className="font-medium">{pu.displayName} ({pu.uniqueId})</p>
+                           <p className="text-sm text-neutral">{pu.email} - Submitted: {new Date(pu.submissionDate).toLocaleDateString()}</p>
+                         </div>
+                         <div className="flex gap-2">
+                            <button onClick={() => { setApprovingPendingUser(pu); setUserForm({...initialUserFormData, id:'approving', displayName: pu.displayName, email: pu.email, uniqueId: pu.uniqueId, role: pu.role}); setEditingUserId(null); }} className="btn-success text-xs px-3 py-1.5">Approve</button>
+                            <button onClick={() => handleRejectPendingUser(pu.id)} className="btn-danger text-xs px-3 py-1.5">Reject</button>
+                         </div>
+                      </li>
+                  )) : <li className="p-4 text-sm text-neutral">No users are currently pending approval.</li>}
+               </ul>
+            </div>
+            
+            {/* Active Users List */}
+            <div className="bg-surface rounded-lg shadow">
+                 <h3 className="text-xl font-semibold text-textlight p-4 border-b flex justify-between items-center">
+                    <span>Active Users</span>
+                    <button onClick={() => { setUserForm({...initialUserFormData, id: 'creating'}); setEditingUserId(null); setApprovingPendingUser(null);}} className="btn-primary text-sm flex items-center gap-1"><PlusCircleIcon className="w-4 h-4"/> New User</button>
+                 </h3>
+               <ul className="divide-y divide-gray-200">
+                   {users.map(user => (
+                       <li key={user.id} className="p-4 flex items-center justify-between">
+                           <div>
+                               <p className="font-medium">{user.displayName} <span className="text-xs text-white px-1.5 py-0.5 rounded-full bg-neutral">{user.role}</span></p>
+                               <p className="text-sm text-neutral">{user.email} - Position: {user.position}</p>
+                           </div>
+                           <div className="flex gap-2">
+                               <button onClick={() => { setEditingUserId(user.id); setUserForm({...user, password: '', confirmPassword: ''}); setApprovingPendingUser(null); }} className="btn-info text-xs px-3 py-1.5">Edit</button>
+                               {currentUser?.id !== user.id && <button onClick={() => handleDeleteUser(user.id)} className="btn-danger text-xs px-3 py-1.5">Delete</button>}
+                           </div>
+                       </li>
+                   ))}
+               </ul>
+            </div>
+         </div>
+       );
+      break;
+    case Page.ManagePrograms:
+      pageContent = (
+        <div className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto">
+          <h2 className="text-2xl font-bold text-textlight mb-4">Manage Programs</h2>
+          <form onSubmit={handleCreateProgram} className="bg-surface rounded-lg shadow p-6 mb-8 space-y-4">
+             <h3 className="text-xl font-semibold text-textlight">Create New Program</h3>
+             <FormInput label="Program Name" id="programName" value={programForm.name} onChange={e => setProgramForm({...programForm, name: e.target.value})} required />
+             <FormTextarea label="Program Description" id="programDescription" value={programForm.description} onChange={e => setProgramForm({...programForm, description: e.target.value})} required />
+             <button type="submit" className="btn-primary">Create Program</button>
+          </form>
+           <div className="bg-surface rounded-lg shadow">
+              <h3 className="text-xl font-semibold text-textlight p-4 border-b">Existing Programs</h3>
+               <ul className="divide-y divide-gray-200">
+                {programs.length > 0 ? programs.map(program => (
+                    <li key={program.id} className="p-4 flex items-start justify-between">
+                       <div>
+                           <p className="font-medium">{program.name}</p>
+                           <p className="text-sm text-neutral">{program.description}</p>
+                       </div>
+                       <button onClick={() => handleDeleteProgram(program.id)} className="btn-danger text-xs px-3 py-1.5 flex-shrink-0 ml-4"><TrashIcon className="w-4 h-4" /></button>
+                    </li>
+                )) : <li className="p-4 text-sm text-neutral">No programs created yet.</li>}
+               </ul>
+           </div>
+        </div>
+      );
+      break;
+    case Page.ManageTasks:
+      pageContent = (
+        <div className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto">
+          <h2 className="text-2xl font-bold text-textlight mb-4">Manage Tasks</h2>
+           <form onSubmit={handleCreateTask} className="bg-surface rounded-lg shadow p-6 mb-8 space-y-4">
+               <h3 className="text-xl font-semibold text-textlight">Create New Task</h3>
+               <FormInput label="Task Title" id="taskTitle" value={taskForm.title} onChange={e => setTaskForm({...taskForm, title: e.target.value})} required />
+               <FormTextarea label="Task Description" id="taskDescription" value={taskForm.description} onChange={e => setTaskForm({...taskForm, description: e.target.value})} required />
+               <FormTextarea label="Required Skills" id="taskSkills" value={taskForm.requiredSkills} onChange={e => setTaskForm({...taskForm, requiredSkills: e.target.value})} required />
+               <FormSelect label="Related Program (Optional)" id="taskProgram" value={taskForm.programId} onChange={e => setTaskForm({...taskForm, programId: e.target.value})}>
+                 <option value="">None</option>
+                 {programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+               </FormSelect>
+               <FormInput label="Deadline (Optional)" id="taskDeadline" type="date" value={taskForm.deadline} onChange={e => setTaskForm({...taskForm, deadline: e.target.value})} />
+               <button type="submit" className="btn-primary">Create Task</button>
+           </form>
+            <div className="bg-surface rounded-lg shadow">
+              <h3 className="text-xl font-semibold text-textlight p-4 border-b">Existing Tasks</h3>
+               <ul className="divide-y divide-gray-200">
+                {tasks.length > 0 ? tasks.map(task => (
+                    <li key={task.id} className="p-4 flex items-start justify-between">
+                       <div>
+                           <p className="font-medium">{task.title}</p>
+                           <p className="text-sm text-neutral">{task.description}</p>
+                           <p className="text-xs mt-1">Skills: {task.requiredSkills}</p>
+                           {task.programName && <p className="text-xs mt-1 text-secondary">Program: {task.programName}</p>}
+                       </div>
+                       <button onClick={() => handleDeleteTask(task.id)} className="btn-danger text-xs px-3 py-1.5 flex-shrink-0 ml-4"><TrashIcon className="w-4 h-4"/></button>
+                    </li>
+                )) : <li className="p-4 text-sm text-neutral">No tasks created yet.</li>}
+               </ul>
+            </div>
+        </div>
+      );
+      break;
+    case Page.AssignWork:
+      pageContent = (
+        <div className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto">
+            <h2 className="text-2xl font-bold text-textlight mb-4">Assign Work</h2>
+            <div className="bg-surface rounded-lg shadow p-6">
+                <div className="space-y-4">
+                    <FormSelect label="1. Select Task to Assign" id="selectTaskForAssignment" value={selectedTaskForAssignment || ''} onChange={e => { setSelectedTaskForAssignment(e.target.value); setAssignmentSuggestion(null); }}>
+                        <option value="" disabled>-- Choose a task --</option>
+                        {tasks.filter(t => !assignments.some(a => a.taskId === t.id && (a.status === 'accepted_by_user' || a.status === 'pending_acceptance'))).map(task => (
+                            <option key={task.id} value={task.id}>{task.title}</option>
+                        ))}
+                    </FormSelect>
+
+                    {selectedTaskForAssignment && (
+                         <div className="p-4 bg-bground rounded-md">
+                            <button onClick={handleGetAssignmentSuggestion} className="btn-secondary flex items-center gap-2" disabled={isLoadingSuggestion}>
+                                <LightBulbIcon className="w-5 h-5"/>
+                                {isLoadingSuggestion ? <LoadingSpinner/> : '2. Get AI Suggestion'}
+                            </button>
+                             {isLoadingSuggestion && <p className="text-sm text-neutral mt-2">Getting suggestion from Gemini...</p>}
+                             {assignmentSuggestion && !isLoadingSuggestion && (
+                                <div className="mt-3 text-sm text-textlight">
+                                    <p><strong className="font-medium">AI Suggests:</strong> {assignmentSuggestion.suggestedPersonName || "No suitable person found."}</p>
+                                    <p className="italic mt-1">"{assignmentSuggestion.justification}"</p>
+                                </div>
+                             )}
+                         </div>
+                    )}
+
+                    {selectedTaskForAssignment && (
+                        <form onSubmit={(e) => handleAssignTask(e, assignmentSuggestion?.suggestedPersonName)} className="pt-4 border-t space-y-4">
+                           <FormSelect label="3. Assign to Person" id="assignPerson" name="assignPerson" required defaultValue={assignmentSuggestion?.suggestedPersonName ? users.find(u => u.displayName === assignmentSuggestion.suggestedPersonName)?.id : ''}>
+                                <option value="" disabled>-- Choose a person --</option>
+                                {users.filter(u => u.role === 'user').map(user => (
+                                    <option key={user.id} value={user.id}>{user.displayName} ({user.position})</option>
+                                ))}
+                           </FormSelect>
+                            <FormInput label="Specific Deadline (Optional)" id="specificDeadline" name="specificDeadline" type="date" value={assignmentForm.specificDeadline} onChange={e => setAssignmentForm({...assignmentForm, specificDeadline: e.target.value})} description="Overrides the default task deadline for this assignment only."/>
+                           <button type="submit" className="btn-primary">Assign Task</button>
+                        </form>
+                    )}
+                </div>
+            </div>
+        </div>
+      );
+      break;
+    default:
+      pageContent = <div className="p-6"><p>Page not found.</p></div>;
   }
 
 
   return (
-    <div className="flex flex-col h-screen bg-bground main-app-scope">
-       {isLoadingAppData && <div className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-70 flex items-center justify-center z-[100]"><LoadingSpinner /><p className="text-white ml-3 text-lg">Loading data...</p></div>}
-       {showUserTour && currentUser && <UserTour user={currentUser} onClose={handleCompleteUserTour} />}
-      
-      <TopNavbar
-        currentUser={currentUser}
-        currentPage={currentPage}
-        navigateTo={navigateTo}
-        handleLogout={handleLogout}
-      />
-
-      <main className="flex-1 p-6 overflow-y-auto"> {/* Removed `main-app-scope` from here as it's on the root */}
-        <UIMessages />
-
-        {currentPage === Page.Dashboard && currentUser.role === 'admin' && (
-          <div className="space-y-6">
-            <h2 className="text-3xl font-semibold text-primary mb-6">Admin Dashboard</h2>
-             <p className="text-md text-neutral">Organization ID: {currentUser.organizationId}</p>
-
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Users</h3> <p className="text-3xl font-bold text-textlight">{users.length}</p> <p className="text-sm text-neutral">Total active users in your organization</p> </div>
-                <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Pending Approvals</h3> <p className="text-3xl font-bold text-textlight">{pendingUsers.length}</p> <p className="text-sm text-neutral">Users awaiting approval in your organization</p> </div>
-                <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Tasks</h3> <p className="text-3xl font-bold text-textlight">{tasks.length}</p> <p className="text-sm text-neutral">Total defined tasks in your organization</p> </div>
-                <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Programs</h3> <p className="text-3xl font-bold text-textlight">{programs.length}</p> <p className="text-sm text-neutral">Total programs in your organization</p> </div>
-                 <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Active Assignments</h3> <p className="text-3xl font-bold text-textlight">{assignments.filter(a => a.status === 'accepted_by_user' || a.status === 'pending_acceptance').length}</p> <p className="text-sm text-neutral">Tasks currently assigned in your organization</p> </div>
-                 <div className="bg-surface p-5 rounded-lg shadow-md"> <h3 className="text-xl font-medium text-secondary mb-2">Completed Tasks</h3> <p className="text-3xl font-bold text-textlight">{assignments.filter(a => a.status === 'completed_admin_approved').length}</p> <p className="text-sm text-neutral">Successfully finished tasks in your organization</p> </div>
-            </div>
-
-            <div className="bg-surface p-6 rounded-lg shadow-md">
-              <h3 className="text-xl font-semibold text-primary mb-4">Admin Log Entry</h3>
-              <form onSubmit={handleAdminLogSubmit} className="space-y-4">
-                <FormTextarea label="Log Message" id="adminLogText" value={adminLogText} onChange={(e) => setAdminLogText(e.target.value)} placeholder="Enter log details..." />
-                <div> <label htmlFor="adminLogImage" className="block text-sm font-medium text-textlight">Attach Image (Optional)</label> <input type="file" id="adminLogImage" aria-label="Attach image to admin log" accept="image/*" onChange={(e) => setAdminLogImageFile(e.target.files ? e.target.files[0] : null)} className="mt-1 block w-full text-sm text-neutral file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-white hover:file:bg-blue-600"/> </div>
-                <button type="submit" className="btn-primary" disabled={isSubmittingLog}> {isSubmittingLog ? <LoadingSpinner/> : 'Add Log Entry'} </button>
-              </form>
-            </div>
-
-            <div className="bg-surface p-6 rounded-lg shadow-md">
-                <h3 className="text-xl font-semibold text-primary mb-4">Recent Admin Logs (Your Organization)</h3>
-                {adminLogs.length === 0 ? <p className="text-neutral">No admin logs for your organization.</p> : (
-                    <ul className="space-y-3 max-h-96 overflow-y-auto">
-                    {adminLogs.slice(0, 10).map(log => ( <li key={log.id} className="p-3 bg-bground rounded-md shadow-sm"> <p className="text-sm text-textlight"><strong className="font-medium">{log.adminDisplayName}</strong>: {log.logText}</p> <p className="text-xs text-neutral mt-1">{new Date(log.timestamp).toLocaleString()}</p> {log.imagePreviewUrl && <div className="mt-2"><img src={log.imagePreviewUrl} alt="Log attachment" className="max-h-40 max-w-xs rounded border border-neutral"/></div>} </li> ))}
-                    </ul>
-                )}
-            </div>
-          </div>
-        )}
-
-        {currentPage === Page.UserProfile && (
-          <div className="max-w-2xl mx-auto bg-surface p-6 rounded-lg shadow-md">
-            <h2 className="text-2xl font-semibold text-primary mb-6">My Profile</h2>
-            <form onSubmit={handleUpdateProfile} className="space-y-4">
-              <FormInput label="Email (Cannot be changed)" id="profileEmail" type="email" value={userForm.email} readOnly disabled description="Login email cannot be changed." />
-               <FormInput label="Organization ID (Cannot be changed)" id="profileOrgId" type="text" value={userForm.organizationId} readOnly disabled description="Your site/organization identifier." />
-              <FormInput label="System ID / Username" id="profileUniqueId" type="text" value={userForm.uniqueId} onChange={e => setUserForm({...userForm, uniqueId: e.target.value})} required description="Your unique system identifier." />
-              <FormInput label="Display Name" id="profileDisplayName" type="text" value={userForm.displayName} onChange={e => setUserForm({...userForm, displayName: e.target.value})} required />
-              <FormInput label="Position / Role Title" id="profilePosition" type="text" value={userForm.position} onChange={e => setUserForm({...userForm, position: e.target.value})} required />
-              <FormTextarea label="My Skills & Interests" id="profileUserInterests" value={userForm.userInterests} onChange={e => setUserForm({...userForm, userInterests: e.target.value})} placeholder="e.g., Python, data analysis" />
-              <FormInput label="Phone (Optional)" id="profilePhone" type="tel" value={userForm.phone} onChange={e => setUserForm({...userForm, phone: e.target.value})} />
-              <FormSelect label="Notification Preference" id="profileNotificationPreference" value={userForm.notificationPreference} onChange={e => setUserForm({...userForm, notificationPreference: e.target.value as NotificationPreference})}> <option value="email">Email</option> <option value="phone" disabled>Phone (Not Implemented)</option> <option value="none">None</option> </FormSelect>
-               <div className="pt-4 border-t border-gray-200">
-                <h3 className="text-lg font-medium text-textlight mb-2">Change Password (Optional)</h3>
-                <FormInput label="New Password" id="profileNewPassword" type="password" value={userForm.password} onChange={e => setUserForm({...userForm, password: e.target.value})} description={passwordRequirementsText} autoComplete="new-password" />
-                <FormInput label="Confirm New Password" id="profileConfirmPassword" type="password" value={userForm.confirmPassword} onChange={e => setUserForm({...userForm, confirmPassword: e.target.value})} autoComplete="new-password" />
-              </div>
-              <button type="submit" className="btn-primary">Update Profile</button>
-            </form>
-          </div>
-        )}
-
-        {currentPage === Page.UserManagement && currentUser.role === 'admin' && (
-          <div className="space-y-6">
-            <h2 className="text-2xl font-semibold text-primary mb-1">User Management (Organization: {currentUser.organizationId})</h2>
-            <p className="text-sm text-neutral mb-6">Manage accounts, approve registrations, view details for your organization.</p>
-
-            {editingUserId || approvingPendingUser || new URLSearchParams(window.location.hash.split('?')[1]).get('action') === 'createUser' ? (
-              <div className="bg-surface p-6 rounded-lg shadow-md">
-                <h3 className="text-xl font-semibold text-accent mb-4"> {editingUserId ? `Edit User: ${users.find(u=>u.id===editingUserId)?.displayName || ''}` : (approvingPendingUser ? `Approve: ${approvingPendingUser.displayName}` : 'Create New User (for your organization)')} </h3>
-                <form onSubmit={editingUserId ? handleAdminUpdateUser : (approvingPendingUser ? handleApprovePendingUser : handleCreateUserByAdmin)} className="space-y-4">
-                  <FormInput label="Email" id="userMgmtEmail" type="email" value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} required />
-                  <FormInput label="System ID / Username" id="userMgmtUniqueId" type="text" value={userForm.uniqueId} onChange={e => setUserForm({...userForm, uniqueId: e.target.value})} required />
-                  <FormInput label="Display Name" id="userMgmtDisplayName" type="text" value={userForm.displayName} onChange={e => setUserForm({...userForm, displayName: e.target.value})} required />
-                  <FormInput label="Position / Role Title" id="userMgmtPosition" type="text" value={userForm.position} onChange={e => setUserForm({...userForm, position: e.target.value})} required />
-                  <FormTextarea label="Skills & Interests" id="userMgmtUserInterests" value={userForm.userInterests} onChange={e => setUserForm({...userForm, userInterests: e.target.value})} />
-                  <FormInput label="Phone (Optional)" id="userMgmtPhone" type="tel" value={userForm.phone} onChange={e => setUserForm({...userForm, phone: e.target.value})} />
-                  <FormSelect label="Notification Preference" id="userMgmtNotificationPreference" value={userForm.notificationPreference} onChange={e => setUserForm({...userForm, notificationPreference: e.target.value as NotificationPreference})}> <option value="email">Email</option> <option value="phone" disabled>Phone (Not Implemented)</option> <option value="none">None</option> </FormSelect>
-                  
-                  <FormSelect label="Role" id="userMgmtRole" value={userForm.role} 
-                    onChange={e => setUserForm({...userForm, role: e.target.value as Role})} 
-                    disabled={!!approvingPendingUser || (editingUserId && users.find(u=>u.id===editingUserId)?.role === 'admin' && users.filter(u=>u.role==='admin').length <=1 )}>
-                     <option value="user">User</option>
-                     <option value="admin">Administrator (for this organization)</option>
-                  </FormSelect>
-                   {approvingPendingUser && <p className="text-xs text-neutral">Role for pending user is typically 'user' upon approval. Backend may enforce policies.</p>}
-                   {(editingUserId && users.find(u=>u.id===editingUserId)?.role === 'admin' && users.filter(u=>u.role==='admin').length <=1 ) && <p className="text-xs text-neutral">Cannot demote the sole administrator of the organization.</p>}
-
-
-                  {!approvingPendingUser && (
-                    <div className="pt-4 border-t border-gray-200">
-                        <h3 className="text-lg font-medium text-textlight mb-2">{editingUserId ? 'Reset Password (Optional)' : 'Set Password'}</h3>
-                        <FormInput label="Password" id="userMgmtPassword" type="password" value={userForm.password} onChange={e => setUserForm({...userForm, password: e.target.value})} required={!editingUserId} description={passwordRequirementsText} autoComplete="new-password"/>
-                        <FormInput label="Confirm Password" id="userMgmtConfirmPassword" type="password" value={userForm.confirmPassword} onChange={e => setUserForm({...userForm, confirmPassword: e.target.value})} required={!editingUserId} autoComplete="new-password" />
-                    </div>
-                  )}
-                  <div className="flex space-x-3"> <button type="submit" className="btn-success"> {editingUserId ? 'Save Changes' : (approvingPendingUser ? 'Approve & Create' : 'Create User')} </button> <button type="button" className="btn-neutral" onClick={() => { setEditingUserId(null); setApprovingPendingUser(null); setUserForm(initialUserFormData); clearMessages(); navigateTo(Page.UserManagement); }}>Cancel</button> </div>
-                </form>
-              </div>
-            ) : ( <button onClick={() => { setUserForm({...initialUserFormData, role: 'user', organizationId: currentUser.organizationId}); clearMessages(); navigateTo(Page.UserManagement, {action: 'createUser'}); }} className="btn-primary mb-4 flex items-center"><PlusCircleIcon className="w-5 h-5 mr-2"/>Add New User</button> )}
-
-             <div className="bg-surface p-6 rounded-lg shadow-md">
-              <h3 className="text-xl font-semibold text-accent mb-3">Pre-registration Link (for your organization)</h3>
-              <button onClick={handleGeneratePreRegistrationLink} className="btn-secondary flex items-center"><KeyIcon className="w-5 h-5 mr-2"/>Generate Link</button>
-              {generatedLink && ( <div className="mt-3 p-3 bg-bground rounded"> <p className="text-sm text-textlight break-all">{generatedLink}</p> <button onClick={() => copyToClipboard(generatedLink)} className="text-xs btn-neutral mt-2">Copy</button> </div> )}
-            </div>
-
-            <div className="bg-surface p-6 rounded-lg shadow-md">
-              <h3 className="text-xl font-semibold text-accent mb-4">Pending Approvals ({pendingUsers.length})</h3>
-              {pendingUsers.length === 0 ? <p className="text-neutral">No users awaiting approval for your organization.</p> : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-bground"> <tr> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Name</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Email / System ID</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Intended Role / Date</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Actions</th> </tr> </thead>
-                    <tbody className="bg-surface divide-y divide-gray-200">
-                      {pendingUsers.map(pu => {
-                        const canApprove = currentUser && currentUser.role === 'admin' && pu.organizationId === currentUser.organizationId;
-                        return (
-                          <tr key={pu.id}>
-                            <td className="px-4 py-3 text-sm text-textlight">{pu.displayName}</td>
-                            <td className="px-4 py-3 text-sm text-textlight">{pu.email} ({pu.uniqueId})</td>
-                            <td className="px-4 py-3 text-sm text-textlight">{pu.role} <br/><span className="text-xs text-neutral">{new Date(pu.submissionDate).toLocaleDateString()}</span></td>
-                            <td className="px-4 py-3 text-sm space-x-2">
-                              <button
-                                onClick={() => { setApprovingPendingUser(pu); setUserForm({ id:'', email: pu.email, uniqueId: pu.uniqueId, displayName: pu.displayName, position: '', userInterests: '', phone: '', notificationPreference: 'email', role: pu.role, password: '', confirmPassword: '', referringAdminId: pu.referringAdminId || currentUser?.id || '', organizationId: currentUser.organizationId }); setEditingUserId(null); navigateTo(Page.UserManagement, {action: 'approveUser', userId: pu.id}); clearMessages(); }}
-                                className={`btn-success text-xs px-2 py-1 ${!canApprove ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                disabled={!canApprove}
-                                title={!canApprove ? "Approval restricted." : "Approve this user"}
-                              >
-                                Approve
-                              </button>
-                              <button onClick={() => handleRejectPendingUser(pu.id)} className="btn-danger text-xs px-2 py-1" disabled={!canApprove}>Reject</button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            <div className="bg-surface p-6 rounded-lg shadow-md">
-              <h3 className="text-xl font-semibold text-accent mb-4">Active Users ({users.length})</h3>
-              {users.length === 0 ? <p className="text-neutral">No active users in your organization.</p> : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-bground"> <tr> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Name</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Email / System ID</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Role / Position</th> <th className="px-4 py-3 text-left text-xs font-medium text-neutral uppercase">Actions</th> </tr> </thead>
-                    <tbody className="bg-surface divide-y divide-gray-200">
-                      {users.map(user => ( <tr key={user.id}> <td className="px-4 py-3 text-sm font-medium text-textlight">{user.displayName}</td> <td className="px-4 py-3 text-sm text-textlight">{user.email}<br/><span className="text-xs text-neutral">{user.uniqueId}</span></td> <td className="px-4 py-3 text-sm text-textlight capitalize">{user.role}<br/><span className="text-xs text-neutral">{user.position}</span></td> <td className="px-4 py-3 text-sm space-x-2"> 
-                        {currentUser.id !== user.id && ( 
-                            <button onClick={() => { setEditingUserId(user.id); setUserForm({ ...user, password: '', confirmPassword: '' }); setApprovingPendingUser(null); navigateTo(Page.UserManagement, {action: 'editUser', userId: user.id}); clearMessages(); }} className="btn-info text-xs px-2 py-1"> Edit </button> 
-                        )}
-                        {currentUser.id !== user.id && ( 
-                          <button onClick={() => handleDeleteUser(user.id)} className={`btn-danger text-xs px-2 py-1 ${user.role === 'admin' && users.filter(u => u.role === 'admin').length <= 1 ? 'opacity-50 cursor-not-allowed' : ''}`} disabled={user.role === 'admin' && users.filter(u => u.role === 'admin').length <=1 } title={user.role === 'admin'  && users.filter(u => u.role === 'admin').length <=1 ? "Cannot delete the sole admin of the organization." : "Delete user"}>Delete</button> 
-                        )} 
-                        {currentUser.id === user.id && (
-                           <button onClick={() => navigateTo(Page.UserProfile)} className="btn-neutral text-xs px-2 py-1">My Profile</button>
-                        )}
-                      </td> </tr> ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {currentPage === Page.ManagePrograms && currentUser.role === 'admin' && (
-          <div className="space-y-6">
-            <h2 className="text-2xl font-semibold text-primary mb-6">Manage Programs (Organization: {currentUser.organizationId})</h2>
-            <div className="bg-surface p-6 rounded-lg shadow-md"> <h3 className="text-xl font-semibold text-accent mb-4">Create Program</h3> <form onSubmit={handleCreateProgram} className="space-y-4"> <FormInput label="Program Name" id="programName" value={programForm.name} onChange={e => setProgramForm({...programForm, name: e.target.value})} required /> <FormTextarea label="Program Description" id="programDescription" value={programForm.description} onChange={e => setProgramForm({...programForm, description: e.target.value})} required /> <button type="submit" className="btn-primary">Create</button> </form> </div>
-            <div className="bg-surface p-6 rounded-lg shadow-md"> <h3 className="text-xl font-semibold text-accent mb-4">Existing Programs ({programs.length})</h3> {programs.length === 0 ? <p className="text-neutral">No programs in your organization.</p> : ( <ul className="space-y-3"> {programs.map(p => ( <li key={p.id} className="p-4 bg-bground rounded-md shadow flex justify-between items-start"> <div> <h4 className="font-semibold text-textlight">{p.name}</h4> <p className="text-sm text-neutral">{p.description}</p> </div> <button onClick={() => handleDeleteProgram(p.id)} className="btn-danger text-xs p-1 ml-2 self-start"><TrashIcon className="w-4 h-4"/></button> </li> ))} </ul> )} </div>
-          </div>
-        )}
-
-        {currentPage === Page.ManageTasks && currentUser.role === 'admin' && (
-          <div className="space-y-6">
-            <h2 className="text-2xl font-semibold text-primary mb-6">Manage Tasks (Organization: {currentUser.organizationId})</h2>
-             <div className="bg-surface p-6 rounded-lg shadow-md"> <h3 className="text-xl font-semibold text-accent mb-4">Create Task</h3> <form onSubmit={handleCreateTask} className="space-y-4"> <FormInput label="Task Title" id="taskTitle" value={taskForm.title} onChange={e => setTaskForm({...taskForm, title: e.target.value})} required /> <FormTextarea label="Description" id="taskDescription" value={taskForm.description} onChange={e => setTaskForm({...taskForm, description: e.target.value})} required /> <FormTextarea label="Required Skills (comma-separated)" id="taskRequiredSkills" value={taskForm.requiredSkills} onChange={e => setTaskForm({...taskForm, requiredSkills: e.target.value})} required placeholder="e.g., JS, Writing"/> <FormSelect label="Related Program (Optional)" id="taskProgramId" value={taskForm.programId} onChange={e => setTaskForm({...taskForm, programId: e.target.value})}> <option value="">None</option> {programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)} </FormSelect> <FormInput label="Deadline (Optional)" id="taskDeadline" type="date" value={taskForm.deadline} onChange={e => setTaskForm({...taskForm, deadline: e.target.value})} /> <button type="submit" className="btn-primary">Create Task</button> </form> </div>
-            <div className="bg-surface p-6 rounded-lg shadow-md"> <h3 className="text-xl font-semibold text-accent mb-4">Existing Tasks ({tasks.length})</h3> {tasks.length === 0 ? <p className="text-neutral">No tasks in your organization.</p> : ( <ul className="space-y-3"> {tasks.map(task => ( <li key={task.id} className="p-4 bg-bground rounded-md shadow"> <div className="flex justify-between items-start"> <div> <h4 className="font-semibold text-textlight">{task.title}</h4> <p className="text-sm text-neutral mt-1">{task.description}</p> <p className="text-xs text-neutral mt-1"><strong>Skills:</strong> {task.requiredSkills}</p> {task.programName && <p className="text-xs text-neutral mt-1"><strong>Program:</strong> {task.programName}</p>} {task.deadline && <p className="text-xs text-neutral mt-1"><strong>Deadline:</strong> {new Date(task.deadline).toLocaleDateString()}</p>} </div> <button onClick={() => handleDeleteTask(task.id)} className="btn-danger text-xs p-1 ml-2 self-start"><TrashIcon className="w-4 h-4"/></button> </div> <div className="mt-2 pt-2 border-t border-gray-300"> <p className="text-xs font-medium text-neutral">Assigned:</p> <ul className="text-xs list-disc list-inside pl-2"> {assignments.filter(a=>a.taskId===task.id).map(a=>(<li key={`${a.taskId}-${a.personId}`} className="text-neutral">{a.personName} - <span className={`font-semibold ${a.status==='completed_admin_approved'?'text-success':a.status==='declined_by_user'?'text-danger':a.status==='pending_acceptance'?'text-warning':'text-info'}`}>{a.status.replace(/_/g,' ')}</span></li>))} {assignments.filter(a=>a.taskId===task.id).length===0 && <li className="text-neutral">None.</li>}</ul></div></li>))}</ul>)}</div>
-          </div>
-        )}
-
-        {currentPage === Page.AssignWork && currentUser.role === 'admin' && (
-          <div className="space-y-6">
-            <h2 className="text-2xl font-semibold text-primary mb-6">Assign Work (Organization: {currentUser.organizationId})</h2>
-            <div className="bg-surface p-6 rounded-lg shadow-md">
-              <FormSelect label="Select Task" id="selectTaskForAssignment" value={selectedTaskForAssignment || ''} onChange={e => { setSelectedTaskForAssignment(e.target.value); setAssignmentSuggestion(null); clearMessages(); }}> <option value="">-- Select Task --</option> {tasks.map(t => (<option key={t.id} value={t.id}>{t.title}</option>))} </FormSelect>
-              {selectedTaskForAssignment && ( <div className="mt-4 p-3 bg-bground rounded"> <h4 className="font-medium text-textlight">Selected Task:</h4> <p className="text-sm text-neutral">{tasks.find(t=>t.id === selectedTaskForAssignment)?.description}</p> <p className="text-xs text-neutral">Skills: {tasks.find(t=>t.id === selectedTaskForAssignment)?.requiredSkills}</p> {tasks.find(t=>t.id === selectedTaskForAssignment)?.deadline && <p className="text-xs">Deadline: {new Date(tasks.find(t=>t.id === selectedTaskForAssignment)!.deadline!).toLocaleDateString()}</p>} </div> )}
-              <button onClick={handleGetAssignmentSuggestion} className="btn-accent mt-4 flex items-center" disabled={!selectedTaskForAssignment || isLoadingSuggestion}> {isLoadingSuggestion ? <LoadingSpinner /> : <><LightBulbIcon className="w-5 h-5 mr-2"/>AI Suggestion</>} </button>
-              {assignmentSuggestion && ( <div className={`mt-4 p-3 rounded shadow-sm ${assignmentSuggestion.suggestedPersonName ? 'bg-green-50' : 'bg-yellow-50'}`}> <p className="text-sm font-medium">{assignmentSuggestion.suggestedPersonName ? `Suggests: ${assignmentSuggestion.suggestedPersonName}` : "AI:"}</p> <p className="text-xs text-neutral">{assignmentSuggestion.justification}</p> </div> )}
-              <form onSubmit={(e) => handleAssignTask(e, assignmentSuggestion?.suggestedPersonName)} className="mt-6 space-y-4">
-                <FormSelect label="Assign to" id="assignPerson" name="assignPerson" required defaultValue={assignmentSuggestion?.suggestedPersonName ? users.find(u => u.displayName === assignmentSuggestion.suggestedPersonName)?.id : ""}> <option value="">-- Select Person --</option> {users.filter(u => u.role === 'user' && !assignments.some(a => a.taskId === selectedTaskForAssignment && a.personId === u.id && (a.status === 'pending_acceptance' || a.status === 'accepted_by_user'))).map(user => ( <option key={user.id} value={user.id}>{user.displayName} ({user.position})</option>))} </FormSelect>
-                <FormInput label="Specific Deadline (Optional)" id="specificDeadline" name="specificDeadline" type="date" value={assignmentForm.specificDeadline} onChange={e => setAssignmentForm({...assignmentForm, specificDeadline: e.target.value})} />
-                <button type="submit" className="btn-primary" disabled={!selectedTaskForAssignment}>Assign Task</button>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {currentPage === Page.ViewAssignments && (
-          <div className="space-y-6">
-            <h2 className="text-2xl font-semibold text-primary mb-6">My Assignments</h2>
-            {assignments.filter(a => currentUser.role === 'admin' || a.personId === currentUser.id).length === 0 ? ( <p className="text-neutral bg-surface p-4 rounded-md shadow"> {currentUser.role === 'admin' ? "No assignments in your organization." : "No tasks assigned to you."} </p> ) : (
-              <ul className="space-y-4">
-                {assignments.filter(a => currentUser.role === 'admin' || a.personId === currentUser.id).sort((x,y) => (x.deadline && y.deadline) ? new Date(x.deadline).getTime() - new Date(y.deadline).getTime() : 0).map(assignment => {
-                    const task = tasks.find(t => t.id === assignment.taskId);
-                    const isLate = assignment.deadline && new Date() > new Date(assignment.deadline) && (assignment.status === 'pending_acceptance' || assignment.status === 'accepted_by_user');
-                    const isSubmittedLate = assignment.status === 'submitted_late';
-                    return ( <li key={`${assignment.taskId}-${assignment.personId}`} className="bg-surface p-4 rounded-lg shadow-md"> <h3 className={`text-lg font-semibold ${isLate && !isSubmittedLate ? 'text-danger' : 'text-textlight'}`}>{assignment.taskTitle}</h3> {currentUser.role === 'admin' && <p className="text-sm text-neutral">To: <strong>{assignment.personName}</strong></p>} <p className="text-xs text-neutral mt-1">Status: <span className={`font-medium ${assignment.status==='completed_admin_approved'?'text-success':assignment.status==='declined_by_user'?'text-danger':assignment.status.startsWith('submitted')?'text-info':assignment.status==='pending_acceptance'?'text-warning':'text-blue-500' }`}>{assignment.status.replace(/_/g,' ')}</span> {isLate && !isSubmittedLate && <span className="text-danger text-xs font-bold ml-2">(OVERDUE)</span>} {isSubmittedLate && <span className="text-warning text-xs font-bold ml-2">(LATE)</span>} </p> {task && <p className="text-sm text-neutral mt-1">{task.description}</p>} {task?.requiredSkills && <p className="text-xs">Skills: {task.requiredSkills}</p>} {assignment.deadline && <p className="text-xs">Deadline: {new Date(assignment.deadline).toLocaleDateString()}</p>} {assignment.justification && assignment.justification !== 'Manually assigned by admin.' && <p className="text-xs italic">AI: {assignment.justification}</p>} {assignment.userSubmissionDate && <p className="text-xs">Submitted: {new Date(assignment.userSubmissionDate).toLocaleString()}</p>} {assignment.userDelayReason && <p className="text-xs">Delay reason: {assignment.userDelayReason}</p>}
-                        <div className="mt-3 pt-3 border-t border-gray-200 space-x-2 flex flex-wrap gap-y-2">
-                          {assignment.status === 'pending_acceptance' && assignment.personId === currentUser.id && ( <> <button onClick={() => handleUserAcceptTask(assignment.taskId)} className="btn-success text-sm">Accept</button> <button onClick={() => handleUserDeclineTask(assignment.taskId)} className="btn-danger text-sm">Decline</button> </> )}
-                          {assignment.status === 'accepted_by_user' && assignment.personId === currentUser.id && ( <> {isLate && assignmentToSubmitDelayReason !== `${assignment.taskId}-${assignment.personId}` && ( <button onClick={() => setAssignmentToSubmitDelayReason(`${assignment.taskId}-${assignment.personId}`)} className="btn-warning text-sm">Submit Late</button> )} {assignmentToSubmitDelayReason === `${assignment.taskId}-${assignment.personId}` && isLate && ( <div className="w-full space-y-2 my-2 p-2 border border-warning bg-yellow-50"> <FormTextarea label="Reason for Late Submission:" id={`delayReason-${assignment.taskId}`} value={userSubmissionDelayReason} onChange={e => setUserSubmissionDelayReason(e.target.value)} /> <button onClick={() => handleUserSubmitTask(assignment.taskId, userSubmissionDelayReason)} className="btn-primary text-sm">Confirm</button> <button onClick={() => { setAssignmentToSubmitDelayReason(null); setUserSubmissionDelayReason(''); }} className="btn-neutral text-sm ml-2">Cancel</button> </div> )} {!isLate && ( <button onClick={() => handleUserSubmitTask(assignment.taskId)} className="btn-primary text-sm">Mark Completed</button> )} </> )}
-                          {currentUser.role === 'admin' && (assignment.status === 'submitted_on_time' || assignment.status === 'submitted_late') && ( <button onClick={() => handleAdminApproveTaskCompletion(assignment.taskId, assignment.personId)} className="btn-success text-sm">Approve Completion</button> )}
-                        </div> </li> );
-                  })} </ul> )}
-          </div>
-        )}
-
-        {currentPage === Page.ViewTasks && (
-            <div className="space-y-6"> <h2 className="text-2xl font-semibold text-primary mb-6">Available Tasks (Your Organization)</h2> {tasks.length === 0 ? ( <p className="text-neutral bg-surface p-4 rounded-md shadow">No tasks defined in your organization.</p> ) : (
-                <ul className="space-y-4">
-                    {tasks.map(task => {
-                        const taskAssignments = assignments.filter(a => a.taskId === task.id);
-                        const isFullyAssigned = taskAssignments.some(a => a.status === 'accepted_by_user' || a.status === 'completed_admin_approved' || a.status.startsWith('submitted'));
-                        const isPending = taskAssignments.some(a => a.status === 'pending_acceptance');
-                        let availability = "Available"; let color = "text-success";
-                        if (isFullyAssigned) { availability = "Assigned/In Progress"; color = "text-neutral"; }
-                        else if (isPending) { availability = "Pending Acceptance"; color = "text-warning"; }
-                        return ( <li key={task.id} className="bg-surface p-4 rounded-lg shadow-md"> <h3 className="text-lg font-semibold">{task.title}</h3> <p className="text-sm mt-1">{task.description}</p> <p className="text-xs mt-1">Skills: {task.requiredSkills}</p> {task.programName && <p className="text-xs">Program: {task.programName}</p>} {task.deadline && <p className="text-xs">Deadline: {new Date(task.deadline).toLocaleDateString()}</p>} <p className={`text-xs font-medium mt-2 ${color}`}>Status: {availability}</p>
-                        {currentUser.role === 'admin' && taskAssignments.length > 0 && ( <div className="mt-2 pt-2 border-t"> <p className="text-xs font-medium">Assignees:</p> <ul className="text-xs list-disc list-inside pl-2"> {taskAssignments.map(a => (<li key={`${a.taskId}-${a.personId}`}>{a.personName} - {a.status.replace(/_/g,' ')}</li>))} </ul> </div> )}
-                        </li> );
-                    })} </ul> )}
-            </div>
-        )}
-      </main>
+    <div className="min-h-screen bg-bground main-app-scope">
+        <TopNavbar currentUser={currentUser} currentPage={currentPage} navigateTo={navigateTo} handleLogout={handleLogout} />
+        <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+            {error && <div className="mx-4 sm:mx-0 mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-md" role="alert"><p>{error}</p><button onClick={clearMessages} className="ml-2 font-bold">X</button></div>}
+            {successMessage && <div className="mx-4 sm:mx-0 mb-4 p-3 bg-green-100 border-green-400 text-green-700 rounded-md" role="alert"><p>{successMessage}</p><button onClick={clearMessages} className="ml-2 font-bold">X</button></div>}
+            {infoMessage && <div className="mx-4 sm:mx-0 mb-4 p-3 bg-blue-100 border-blue-400 text-blue-700 rounded-md" role="status"><p>{infoMessage}</p><button onClick={clearMessages} className="ml-2 font-bold">X</button></div>}
+            {isLoadingAppData && <LoadingSpinner />}
+            {!isLoadingAppData && pageContent}
+        </main>
+        {showAdminTour && currentUser?.role === 'admin' && <AdminTour user={currentUser} onClose={handleAdminTourClose} />}
+        {showUserTour && currentUser && <UserTour user={currentUser} onClose={handleTourClose} />}
     </div>
   );
 };
