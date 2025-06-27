@@ -1,6 +1,7 @@
 
 import React from 'react';
 import { Page } from '../types'; // Adjust path as needed
+import LoadingSpinner from './LoadingSpinner';
 
 interface PreRegistrationFormState {
   uniqueId: string;
@@ -22,11 +23,12 @@ interface PreRegistrationFormPageProps {
   infoMessage: string | null;
   clearMessages: () => void;
   navigateToLogin: () => void;
+  isVerifyingLink: boolean;
 }
 
 const passwordRequirementsText = "Must be at least 8 characters and include an uppercase letter, a lowercase letter, a number, and a special character (e.g., !@#$%).";
 
-const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = ({
+export const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = ({
   formState,
   setFormState,
   onSubmit,
@@ -35,6 +37,7 @@ const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = ({
   infoMessage,
   clearMessages,
   navigateToLogin,
+  isVerifyingLink,
 }) => {
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -44,10 +47,21 @@ const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = ({
   const UIMessages: React.FC = () => (
     <>
       {error && <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-md shadow-lg w-full" role="alert"><p><strong className="font-bold">Error:</strong> {error}</p><button onClick={clearMessages} className="ml-2 text-sm font-bold">X</button></div>}
-      {successMessage && <div className="mb-4 p-3 bg-green-100 border border-green-400 text-green-700 rounded-md shadow-lg w-full" role="alert"><p>{successMessage}</p><button onClick={clearMessages} className="ml-2 text-sm font-bold">X</button></div>}
-      {infoMessage && <div className="mb-4 p-3 bg-blue-100 border border-blue-400 text-blue-700 rounded-md shadow-lg w-full" role="status"><p>{infoMessage}</p><button onClick={clearMessages} className="ml-2 text-sm font-bold">X</button></div>}
+      {successMessage && <div className="mb-4 p-3 bg-green-100 border-green-400 text-green-700 rounded-md shadow-lg w-full" role="alert"><p>{successMessage}</p><button onClick={clearMessages} className="ml-2 text-sm font-bold">X</button></div>}
+      {infoMessage && <div className="mb-4 p-3 bg-blue-100 border-blue-400 text-blue-700 rounded-md shadow-lg w-full" role="status"><p>{infoMessage}</p><button onClick={clearMessages} className="ml-2 text-sm font-bold">X</button></div>}
     </>
   );
+
+  if (isVerifyingLink) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-authPageBg p-4">
+        <div className="bg-surface p-8 rounded-xl shadow-2xl w-full max-w-lg text-center">
+            <LoadingSpinner />
+            <p className="mt-4 text-textlight">Verifying registration link...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!formState.isReferralLinkValid && !successMessage) { 
     return (
@@ -64,7 +78,7 @@ const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = ({
           </button>
         </div>
         <footer className="text-center py-6 text-sm text-neutral mt-auto">
-          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by SHAIK MOAHAMMED NAWAZ.</p>
+          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by AI.</p>
         </footer>
       </div>
     );
@@ -85,7 +99,7 @@ const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = ({
           </button>
         </div>
         <footer className="text-center py-6 text-sm text-neutral mt-auto">
-          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by SHAIK MOAHAMMED NAWAZ.</p>
+          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by AI.</p>
         </footer>
       </div>
     );
@@ -193,10 +207,8 @@ const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = ({
         </p>
       </div>
       <footer className="text-center py-6 text-sm text-neutral mt-auto">
-        <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by SHAIK MOAHAMMED NAWAZ.</p>
+        <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by AI.</p>
       </footer>
     </div>
   );
 };
-
-export default PreRegistrationFormPage;

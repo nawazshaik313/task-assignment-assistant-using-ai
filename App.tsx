@@ -3,12 +3,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Page, User, Role, Task, Assignment, Program, GeminiSuggestion, NotificationPreference, AssignmentStatus, PendingUser, AdminLogEntry } from './types';
 import useLocalStorage from './hooks/useLocalStorage';
 import { getAssignmentSuggestion } from './services/geminiService';
-import * as emailService from './utils/emailService'; // Corrected import path
-import { validatePassword } from './utils/validation'; // Corrected import path
+import * as emailService from './src/utils/emailService'; // Corrected import path
+import { validatePassword } from './src/utils/validation'; // Corrected import path
 // import * //as cloudDataService from './services/cloudDataService'; // Deactivated
 import LoadingSpinner from './components/LoadingSpinner';
 import { UsersIcon, ClipboardListIcon, LightBulbIcon, CheckCircleIcon, TrashIcon, PlusCircleIcon, KeyIcon, BriefcaseIcon, LogoutIcon, UserCircleIcon } from './components/Icons';
-import PreRegistrationFormPage from './components/PreRegistrationFormPage';
+import { PreRegistrationFormPage } from './components/PreRegistrationFormPage';
 import UserTour from './components/UserTour';
 // import Sidebar from './components/Sidebar'; // Sidebar is replaced by TopNavbar
 import TopNavbar from './components/TopNavbar'; // Import the new TopNavbar component
@@ -190,6 +190,7 @@ export const App = (): JSX.Element => {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [adminLogs, setAdminLogs] = useState<AdminLogEntry[]>([]);
   const [isLoadingAppData, setIsLoadingAppData] = useState<boolean>(true); 
+  const [isVerifyingLink, setIsVerifyingLink] = useState<boolean>(false);
 
 
   const [authView, setAuthView] = useState<'login' | 'register'>('login');
@@ -244,14 +245,14 @@ export const App = (): JSX.Element => {
 
   const clearMessages = useCallback(() => { setError(null); setSuccessMessage(null); setInfoMessage(null); }, []);
 
-  const setCurrentUser = (user: User | null) => {
+  const setCurrentUser = useCallback((user: User | null) => {
     setCurrentUserInternal(user);
     if (user && user.token) {
       localStorage.setItem(JWT_TOKEN_KEY, user.token);
     } else if (!user) {
       localStorage.removeItem(JWT_TOKEN_KEY);
     }
-  };
+  }, []);
 
   const loadInitialData = useCallback(async (loggedInUserTokenData?: User) => { // Token data includes orgId
     setIsLoadingAppData(true);
@@ -260,7 +261,7 @@ export const App = (): JSX.Element => {
       let activeUserWithFullProfile: User | null = null;
       
       if (loggedInUserTokenData && loggedInUserTokenData.token) {
-          setCurrentUserInternal(loggedInUserTokenData); 
+          setCurrentUser(loggedInUserTokenData); 
           const userFromServer = await fetchData<BackendUser>('/users/current', {}, null);
           if (userFromServer) {
             activeUserWithFullProfile = { ...userFromServer, id: userFromServer.id || userFromServer._id!, token: loggedInUserTokenData.token };
@@ -310,6 +311,7 @@ export const App = (): JSX.Element => {
       setError("Failed to load application data. Error: " + err.message);
       if (err.message.includes("Authentication/Authorization failed") || 
           err.message.includes("Token is missing organization information") ||
+          err.message.includes("Access token missing") ||
           err.message.includes("Invalid or expired token")) {
         setCurrentUser(null); // This will also remove JWT_TOKEN_KEY
         // Navigation to Login will be handled by the hashChange effect
@@ -317,7 +319,7 @@ export const App = (): JSX.Element => {
     } finally {
       setIsLoadingAppData(false);
     }
-  }, []); 
+  }, [setCurrentUser]); 
 
   useEffect(() => {
     if (!currentUser) {
@@ -355,13 +357,9 @@ export const App = (): JSX.Element => {
   const navigateTo = useCallback((page: Page, params?: Record<string, string>) => { let hash = `#${page}`; if (params && Object.keys(params).length > 0) { hash += `?${new URLSearchParams(params).toString()}`; } if (window.location.hash !== hash) { window.location.hash = hash; } else { _setCurrentPageInternal(page); } }, []);
 
   useEffect(() => {
-    // Wait for initial data loading to complete, especially if there's no current user yet.
-    // This prevents premature redirection to login if a token is being validated.
     if (isLoadingAppData && !currentUser && localStorage.getItem(JWT_TOKEN_KEY)) {
         return; 
     }
-    // If loading is done and there's still no current user (even if there was a token, it might have been invalid)
-    // then proceed with routing (which will likely lead to login page if hash is not login/prereg).
     
     const processHash = () => {
       clearMessages();
@@ -383,32 +381,27 @@ export const App = (): JSX.Element => {
         }
 
         _setCurrentPageInternal(Page.PreRegistration);
+        setIsVerifyingLink(true);
 
-        // Immediately set a valid state with a default name.
-        // This prevents the "invalid link" message from flashing.
-        setPreRegistrationForm({
-            ...initialPreRegistrationFormState,
-            referringAdminId: refAdminIdFromHash,
-            referringAdminDisplayName: 'an administrator', // A sensible default
-            isReferralLinkValid: true
-        });
-        
-        // Then, try to fetch the actual admin name to enhance the UI.
-        // This call is to a new, public endpoint.
         fetchData<{displayName: string}>(`/users/public-info/${refAdminIdFromHash}`, {}, null)
           .then(adminInfo => {
             if (adminInfo && adminInfo.displayName) {
-                setPreRegistrationForm(prev => ({
-                  ...prev,
+                setPreRegistrationForm({
+                  ...initialPreRegistrationFormState,
+                  referringAdminId: refAdminIdFromHash,
                   referringAdminDisplayName: adminInfo.displayName,
-                }));
+                  isReferralLinkValid: true
+                });
+            } else {
+                setPreRegistrationForm(prev => ({ ...prev, isReferralLinkValid: false }));
             }
-            // If adminInfo is null or doesn't have displayName, the default 'an administrator' remains, which is fine.
           })
           .catch(err => {
-            // Log the error but don't show a breaking error to the user.
-            // The form is still usable with the default admin name.
             console.warn(`Could not fetch admin display name for pre-registration: ${err.message}`);
+            setPreRegistrationForm(prev => ({ ...prev, isReferralLinkValid: false }));
+          })
+          .finally(() => {
+            setIsVerifyingLink(false);
           });
 
         return;
@@ -1201,6 +1194,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
           infoMessage={infoMessage}
           clearMessages={clearMessages}
           navigateToLogin={() => navigateTo(Page.Login)}
+          isVerifyingLink={isVerifyingLink}
         />
       );
     }
