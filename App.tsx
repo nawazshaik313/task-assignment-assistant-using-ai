@@ -3,8 +3,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Page, User, Role, Task, Assignment, Program, GeminiSuggestion, NotificationPreference, AssignmentStatus, PendingUser, AdminLogEntry } from './types';
 import useLocalStorage from './hooks/useLocalStorage';
 import { getAssignmentSuggestion } from './services/geminiService';
-import * as emailService from './utils/emailService'; // Corrected import path
-import { validatePassword } from './utils/validation'; // Corrected import path
+import * as emailService from './src/utils/emailService'; // Corrected import path
+import { validatePassword } from './src/utils/validation'; // Corrected import path
 // import * //as cloudDataService from './services/cloudDataService'; // Deactivated
 import LoadingSpinner from './components/LoadingSpinner';
 import { UsersIcon, ClipboardListIcon, LightBulbIcon, CheckCircleIcon, TrashIcon, PlusCircleIcon, KeyIcon, BriefcaseIcon, LogoutIcon, UserCircleIcon } from './components/Icons';
@@ -1327,7 +1327,7 @@ const handleUpdateAssignmentStatus = async (assignment: Assignment, newStatus: A
                  )}
              </div>
               <footer className="text-center py-6 text-sm text-neutral mt-auto">
-                <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by AI.</p>
+                <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by Shaik Mohammed Nawaz.</p>
               </footer>
             </div>
         );
