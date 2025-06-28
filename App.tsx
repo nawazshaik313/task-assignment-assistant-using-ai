@@ -5,12 +5,10 @@ import useLocalStorage from './hooks/useLocalStorage';
 import { getAssignmentSuggestion } from './services/geminiService';
 import * as emailService from './src/utils/emailService'; // Corrected import path
 import { validatePassword } from './src/utils/validation'; // Corrected import path
-// import * //as cloudDataService from './services/cloudDataService'; // Deactivated
 import LoadingSpinner from './components/LoadingSpinner';
 import { UsersIcon, ClipboardListIcon, LightBulbIcon, CheckCircleIcon, TrashIcon, PlusCircleIcon, KeyIcon, BriefcaseIcon, LogoutIcon, UserCircleIcon } from './components/Icons';
 import { PreRegistrationFormPage } from './components/PreRegistrationFormPage';
 import UserTour from './components/UserTour';
-// import Sidebar from './components/Sidebar'; // Sidebar is replaced by TopNavbar
 import TopNavbar from './components/TopNavbar'; // Import the new TopNavbar component
 
 const API_BASE_URL = 'https://task-management-backend-17a5.onrender.com';
@@ -288,7 +286,9 @@ export const App = (): JSX.Element => {
         const [
           loadedUsers, loadedPendingUsers, loadedTasks, loadedPrograms, loadedAssignments, loadedAdminLogs,
         ] = await Promise.all([
-          fetchData<User[]>('/users', {}, []),
+          activeUserWithFullProfile.role === 'admin'
+            ? fetchData<User[]>('/users', {}, [])
+            : Promise.resolve(activeUserWithFullProfile ? [activeUserWithFullProfile] : []),
           activeUserWithFullProfile.role === 'admin' ? fetchData<PendingUser[]>('/pending-users', {}, []) : Promise.resolve([]),
           fetchData<Task[]>('/tasks', {}, []),
           fetchData<Program[]>('/programs', {}, []),
