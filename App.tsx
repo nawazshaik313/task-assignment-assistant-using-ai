@@ -5,13 +5,10 @@ import useLocalStorage from './hooks/useLocalStorage';
 import { getAssignmentSuggestion } from './services/geminiService';
 import * as emailService from './src/utils/emailService'; // Corrected import path
 import { validatePassword } from './src/utils/validation'; // Corrected import path
-// import * //as cloudDataService from './services/cloudDataService'; // Deactivated
 import LoadingSpinner from './components/LoadingSpinner';
 import { UsersIcon, ClipboardListIcon, LightBulbIcon, CheckCircleIcon, TrashIcon, PlusCircleIcon, KeyIcon, BriefcaseIcon, LogoutIcon, UserCircleIcon } from './components/Icons';
 import { PreRegistrationFormPage } from './components/PreRegistrationFormPage';
 import UserTour from './components/UserTour';
-import AdminTour from './components/AdminTour';
-// import Sidebar from './components/Sidebar'; // Sidebar is replaced by TopNavbar
 import TopNavbar from './components/TopNavbar'; // Import the new TopNavbar component
 
 const API_BASE_URL = 'https://task-management-backend-17a5.onrender.com';
@@ -243,7 +240,6 @@ export const App = (): JSX.Element => {
   const [isSubmittingLog, setIsSubmittingLog] = useState(false);
 
   const [showUserTour, setShowUserTour] = useState<boolean>(false);
-  const [showAdminTour, setShowAdminTour] = useState<boolean>(false);
 
   const clearMessages = useCallback(() => { setError(null); setSuccessMessage(null); setInfoMessage(null); }, []);
 
@@ -436,12 +432,7 @@ export const App = (): JSX.Element => {
       if (currentUser) {
         const isNotAuthPage = (page: Page | string) => page !== Page.Login.toUpperCase() && page !== Page.PreRegistration.toUpperCase() && Object.values(Page).includes(page as Page);
         
-        if (currentUser.role === 'admin' && !localStorage.getItem(`hasCompletedAdminTour_${currentUser.id}`)) {
-          setTimeout(() => {
-            const finalCurrentPage = window.location.hash.substring(1).split('?')[0].toUpperCase();
-            if (isNotAuthPage(finalCurrentPage)) setShowAdminTour(true);
-          }, 500);
-        } else if (currentUser.role === 'user' && !localStorage.getItem(`hasCompletedUserTour_${currentUser.id}`)) {
+        if (currentUser.role === 'user' && !localStorage.getItem(`hasCompletedUserTour_${currentUser.id}`)) {
           setTimeout(() => {
             const finalCurrentPage = window.location.hash.substring(1).split('?')[0].toUpperCase();
             if (isNotAuthPage(finalCurrentPage)) setShowUserTour(true);
@@ -642,9 +633,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
         const targetPage = loggedInUserWithTokenAndOrg.role === 'admin' ? Page.Dashboard : Page.ViewAssignments;
         navigateTo(targetPage); // This might need to be after loadInitialData fully resolves and updates state.
 
-        if (loggedInUserWithTokenAndOrg.role === 'admin' && !localStorage.getItem(`hasCompletedAdminTour_${loggedInUserWithTokenAndOrg.id}`)) {
-          setShowAdminTour(true);
-        } else if (loggedInUserWithTokenAndOrg.role === 'user' && !localStorage.getItem(`hasCompletedUserTour_${loggedInUserWithTokenAndOrg.id}`)) {
+        if (loggedInUserWithTokenAndOrg.role === 'user' && !localStorage.getItem(`hasCompletedUserTour_${loggedInUserWithTokenAndOrg.id}`)) {
           setShowUserTour(true);
         }
       } else {
@@ -1152,17 +1141,6 @@ const handleUpdateAssignmentStatus = async (assignment: Assignment, newStatus: A
     }
   };
 
-  const handleAdminTourClose = (completed: boolean) => {
-    setShowAdminTour(false);
-    if (currentUser) {
-      localStorage.setItem(`hasCompletedAdminTour_${currentUser.id}`, 'true');
-      if (completed) {
-        setSuccessMessage("You've completed the admin tour! You can now manage your organization.");
-      }
-    }
-  };
-
-
   const formatAssignmentStatus = (status: AssignmentStatus): string => {
     return status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
   };
@@ -1327,7 +1305,7 @@ const handleUpdateAssignmentStatus = async (assignment: Assignment, newStatus: A
                  )}
              </div>
               <footer className="text-center py-6 text-sm text-neutral mt-auto">
-                <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by Shaik Mohammed Nawaz.</p>
+                <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by AI.</p>
               </footer>
             </div>
         );
@@ -1731,7 +1709,6 @@ const handleUpdateAssignmentStatus = async (assignment: Assignment, newStatus: A
             {isLoadingAppData && <LoadingSpinner />}
             {!isLoadingAppData && pageContent}
         </main>
-        {showAdminTour && currentUser?.role === 'admin' && <AdminTour user={currentUser} onClose={handleAdminTourClose} />}
         {showUserTour && currentUser && <UserTour user={currentUser} onClose={handleTourClose} />}
     </div>
   );
