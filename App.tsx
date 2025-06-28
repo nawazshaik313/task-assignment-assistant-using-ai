@@ -1021,76 +1021,93 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
     } catch (err:any) { setError(err.message || "Failed to assign task."); }
   };
 
-  const updateAssignmentStatus = async (taskId: string, personId: string, newStatus: AssignmentStatus, additionalData: Record<string, any> = {}) => {
-    if (!currentUser && newStatus !== 'pending_acceptance') return null; 
-    if (!currentUser || !currentUser.organizationId) { setError("Organization context missing."); return null;}
+  const updateAssignmentStatus = async (assignmentId: string, newStatus: AssignmentStatus, additionalData: Record<string, any> = {}) => {
+    if (!currentUser || !currentUser.organizationId) {
+      setError("Organization context missing.");
+      return null;
+    }
     clearMessages();
-    const payload = { taskId, personId, status: newStatus, ...additionalData };
+    const payload = { status: newStatus, ...additionalData };
     try {
-      const updatedAssignment = await fetchData<Assignment>(`/assignments`, { method: 'PATCH', body: JSON.stringify(payload) });
-      if (updatedAssignment && updatedAssignment.taskId) {
-        setAssignments(prev => prev.map(a => (a.taskId === taskId && a.personId === personId) ? updatedAssignment : a));
+      const updatedAssignment = await fetchData<Assignment>(`/assignments/${assignmentId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload)
+      });
+      if (updatedAssignment && updatedAssignment.id) {
+        setAssignments(prev => prev.map(a => (a.id === assignmentId ? updatedAssignment : a)));
         return updatedAssignment;
-      } else { setError(`Failed to update task status. Server did not confirm.`); return null; }
-    } catch (err:any) { setError(err.message || `Failed to update task status.`); throw err; }
+      } else {
+        setError(`Failed to update task status. Server did not confirm the update.`);
+        return null;
+      }
+    } catch (err: any) {
+      setError(err.message || `Failed to update task status.`);
+      throw err;
+    }
   };
 
 
-  const handleUserAcceptTask = async (taskId: string) => {
-    if (!currentUser) return;
+  const handleUserAcceptTask = async (assignmentId: string) => {
     try {
-        const updatedAssignment = await updateAssignmentStatus(taskId, currentUser.id, 'accepted_by_user');
+        const updatedAssignment = await updateAssignmentStatus(assignmentId, 'accepted_by_user');
         if (updatedAssignment) {
             setSuccessMessage(`Task "${updatedAssignment.taskTitle}" accepted.`);
-            const admin = getAdminToNotify(users.find(u=>u.id === currentUser.referringAdminId)?.id); 
-            if (admin?.notificationPreference === 'email' && admin.email) { emailService.sendTaskStatusUpdateToAdminEmail(admin.email, admin.displayName, currentUser.displayName, updatedAssignment.taskTitle, "accepted"); }
+            const admin = getAdminToNotify(users.find(u=>u.id === currentUser?.referringAdminId)?.id); 
+            if (admin?.notificationPreference === 'email' && admin.email) {
+                emailService.sendTaskStatusUpdateToAdminEmail(admin.email, admin.displayName, currentUser!.displayName, updatedAssignment.taskTitle, "accepted");
+            }
         }
     } catch (e) { /* error set by updateAssignmentStatus */ }
   };
 
-  const handleUserDeclineTask = async (taskId: string) => {
-    if (!currentUser) return;
+  const handleUserDeclineTask = async (assignmentId: string) => {
      try {
-        const updatedAssignment = await updateAssignmentStatus(taskId, currentUser.id, 'declined_by_user');
+        const updatedAssignment = await updateAssignmentStatus(assignmentId, 'declined_by_user');
          if (updatedAssignment) {
             setSuccessMessage(`Task "${updatedAssignment.taskTitle}" declined.`);
-            const admin = getAdminToNotify(users.find(u=>u.id === currentUser.referringAdminId)?.id);
-            if (admin?.notificationPreference === 'email' && admin.email) { emailService.sendTaskStatusUpdateToAdminEmail(admin.email, admin.displayName, currentUser.displayName, updatedAssignment.taskTitle, "declined"); }
+            const admin = getAdminToNotify(users.find(u=>u.id === currentUser?.referringAdminId)?.id);
+            if (admin?.notificationPreference === 'email' && admin.email) {
+                emailService.sendTaskStatusUpdateToAdminEmail(admin.email, admin.displayName, currentUser!.displayName, updatedAssignment.taskTitle, "declined");
+            }
         }
     } catch (e) { /* error set */ }
   };
 
-  const handleUserSubmitTask = async (taskId: string, delayReason?: string) => {
+  const handleUserSubmitTask = async (assignmentId: string, delayReason?: string) => {
     if (!currentUser) return;
-    const assignment = assignments.find(a => a.taskId === taskId && a.personId === currentUser.id && a.status === 'accepted_by_user');
+    const assignment = assignments.find(a => a.id === assignmentId && a.status === 'accepted_by_user');
     if (!assignment) { setError("Task not found or not accepted."); return; }
     const submissionDate = new Date();
     let newStatus: AssignmentStatus = 'submitted_on_time';
     if (assignment.deadline && submissionDate > new Date(assignment.deadline)) {
       newStatus = 'submitted_late';
-      if (!delayReason && assignmentToSubmitDelayReason === `${assignment.taskId}-${assignment.personId}`) { setError("Reason required for late submission."); return; }
+      if (!delayReason && assignmentToSubmitDelayReason === assignment.id) { setError("Reason required for late submission."); return; }
     }
     const additionalData: any = { userSubmissionDate: submissionDate.toISOString() };
     if (newStatus === 'submitted_late') additionalData.userDelayReason = delayReason || userSubmissionDelayReason;
     try {
-        const updated = await updateAssignmentStatus(taskId, currentUser.id, newStatus, additionalData);
+        const updated = await updateAssignmentStatus(assignmentId, newStatus, additionalData);
         if (updated) {
             setSuccessMessage(`Task "${updated.taskTitle}" submitted.`);
             setUserSubmissionDelayReason(''); setAssignmentToSubmitDelayReason(null);
             const admin = getAdminToNotify(users.find(u=>u.id === currentUser.referringAdminId)?.id);
-            if (admin?.notificationPreference === 'email' && admin.email) { emailService.sendTaskStatusUpdateToAdminEmail(admin.email, admin.displayName, currentUser.displayName, updated.taskTitle, `submitted (${newStatus.replace(/_/g, ' ')})`); }
+            if (admin?.notificationPreference === 'email' && admin.email) {
+                emailService.sendTaskStatusUpdateToAdminEmail(admin.email, admin.displayName, currentUser.displayName, updated.taskTitle, `submitted (${newStatus.replace(/_/g, ' ')})`);
+            }
         }
     } catch (e) { /* error set */ }
   };
 
-  const handleAdminApproveTaskCompletion = async (taskId: string, personId: string) => {
+  const handleAdminApproveTaskCompletion = async (assignmentId: string) => {
     if (!currentUser || currentUser.role !== 'admin') return;
      try {
-        const updated = await updateAssignmentStatus(taskId, personId, 'completed_admin_approved');
+        const updated = await updateAssignmentStatus(assignmentId, 'completed_admin_approved');
         if (updated) {
-            const user = users.find(u => u.id === personId); 
+            const user = users.find(u => u.id === updated.personId); 
             setSuccessMessage(`Completion of task "${updated.taskTitle}" by ${user?.displayName || 'user'} approved.`);
-            if (user?.notificationPreference === 'email' && user.email) { emailService.sendTaskCompletionApprovedToUserEmail(user.email, user.displayName, updated.taskTitle, currentUser.displayName); }
+            if (user?.notificationPreference === 'email' && user.email) {
+                emailService.sendTaskCompletionApprovedToUserEmail(user.email, user.displayName, updated.taskTitle, currentUser.displayName);
+            }
             await addAdminLogEntry(`Admin approved task completion for "${updated.taskTitle}" by ${user?.displayName}.`);
         }
     } catch (e) { /* error set */ }
@@ -1485,14 +1502,14 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
             {assignments.filter(a => currentUser.role === 'admin' || a.personId === currentUser.id).length === 0 ? ( <p className="text-neutral bg-surface p-4 rounded-md shadow"> {currentUser.role === 'admin' ? "No assignments in your organization." : "No tasks assigned to you."} </p> ) : (
               <ul className="space-y-4">
                 {assignments.filter(a => currentUser.role === 'admin' || a.personId === currentUser.id).sort((x,y) => (x.deadline && y.deadline) ? new Date(x.deadline).getTime() - new Date(y.deadline).getTime() : 0).map(assignment => {
-                    const task = tasks.find(t => t.id === assignment.taskId);
+                    const task = typeof assignment.taskId === 'object' ? assignment.taskId : tasks.find(t => t.id === assignment.taskId);
                     const isLate = assignment.deadline && new Date() > new Date(assignment.deadline) && (assignment.status === 'pending_acceptance' || assignment.status === 'accepted_by_user');
                     const isSubmittedLate = assignment.status === 'submitted_late';
-                    return ( <li key={`${assignment.taskId}-${assignment.personId}`} className="bg-surface p-4 rounded-lg shadow-md"> <h3 className={`text-lg font-semibold ${isLate && !isSubmittedLate ? 'text-danger' : 'text-textlight'}`}>{assignment.taskTitle}</h3> {currentUser.role === 'admin' && <p className="text-sm text-neutral">To: <strong>{assignment.personName}</strong></p>} <p className="text-xs text-neutral mt-1">Status: <span className={`font-medium ${assignment.status==='completed_admin_approved'?'text-success':assignment.status==='declined_by_user'?'text-danger':assignment.status.startsWith('submitted')?'text-info':assignment.status==='pending_acceptance'?'text-warning':'text-blue-500' }`}>{assignment.status.replace(/_/g,' ')}</span> {isLate && !isSubmittedLate && <span className="text-danger text-xs font-bold ml-2">(OVERDUE)</span>} {isSubmittedLate && <span className="text-warning text-xs font-bold ml-2">(LATE)</span>} </p> {task && <p className="text-sm text-neutral mt-1">{task.description}</p>} {task?.requiredSkills && <p className="text-xs">Skills: {task.requiredSkills}</p>} {assignment.deadline && <p className="text-xs">Deadline: {new Date(assignment.deadline).toLocaleDateString()}</p>} {assignment.justification && assignment.justification !== 'Manually assigned by admin.' && <p className="text-xs italic">AI: {assignment.justification}</p>} {assignment.userSubmissionDate && <p className="text-xs">Submitted: {new Date(assignment.userSubmissionDate).toLocaleString()}</p>} {assignment.userDelayReason && <p className="text-xs">Delay reason: {assignment.userDelayReason}</p>}
+                    return ( <li key={assignment.id} className="bg-surface p-4 rounded-lg shadow-md"> <h3 className={`text-lg font-semibold ${isLate && !isSubmittedLate ? 'text-danger' : 'text-textlight'}`}>{assignment.taskTitle}</h3> {currentUser.role === 'admin' && <p className="text-sm text-neutral">To: <strong>{assignment.personName}</strong></p>} <p className="text-xs text-neutral mt-1">Status: <span className={`font-medium ${assignment.status==='completed_admin_approved'?'text-success':assignment.status==='declined_by_user'?'text-danger':assignment.status.startsWith('submitted')?'text-info':assignment.status==='pending_acceptance'?'text-warning':'text-blue-500' }`}>{assignment.status.replace(/_/g,' ')}</span> {isLate && !isSubmittedLate && <span className="text-danger text-xs font-bold ml-2">(OVERDUE)</span>} {isSubmittedLate && <span className="text-warning text-xs font-bold ml-2">(LATE)</span>} </p> {task && <p className="text-sm text-neutral mt-1">{task.description}</p>} {task?.requiredSkills && <p className="text-xs">Skills: {task.requiredSkills}</p>} {assignment.deadline && <p className="text-xs">Deadline: {new Date(assignment.deadline).toLocaleDateString()}</p>} {assignment.justification && assignment.justification !== 'Manually assigned by admin.' && <p className="text-xs italic">AI: {assignment.justification}</p>} {assignment.userSubmissionDate && <p className="text-xs">Submitted: {new Date(assignment.userSubmissionDate).toLocaleString()}</p>} {assignment.userDelayReason && <p className="text-xs">Delay reason: {assignment.userDelayReason}</p>}
                         <div className="mt-3 pt-3 border-t border-gray-200 space-x-2 flex flex-wrap gap-y-2">
-                          {assignment.status === 'pending_acceptance' && assignment.personId === currentUser.id && ( <> <button onClick={() => handleUserAcceptTask(assignment.taskId)} className="btn-success text-sm">Accept</button> <button onClick={() => handleUserDeclineTask(assignment.taskId)} className="btn-danger text-sm">Decline</button> </> )}
-                          {assignment.status === 'accepted_by_user' && assignment.personId === currentUser.id && ( <> {isLate && assignmentToSubmitDelayReason !== `${assignment.taskId}-${assignment.personId}` && ( <button onClick={() => setAssignmentToSubmitDelayReason(`${assignment.taskId}-${assignment.personId}`)} className="btn-warning text-sm">Submit Late</button> )} {assignmentToSubmitDelayReason === `${assignment.taskId}-${assignment.personId}` && isLate && ( <div className="w-full space-y-2 my-2 p-2 border border-warning bg-yellow-50"> <FormTextarea label="Reason for Late Submission:" id={`delayReason-${assignment.taskId}`} value={userSubmissionDelayReason} onChange={e => setUserSubmissionDelayReason(e.target.value)} /> <button onClick={() => handleUserSubmitTask(assignment.taskId, userSubmissionDelayReason)} className="btn-primary text-sm">Confirm</button> <button onClick={() => { setAssignmentToSubmitDelayReason(null); setUserSubmissionDelayReason(''); }} className="btn-neutral text-sm ml-2">Cancel</button> </div> )} {!isLate && ( <button onClick={() => handleUserSubmitTask(assignment.taskId)} className="btn-primary text-sm">Mark Completed</button> )} </> )}
-                          {currentUser.role === 'admin' && (assignment.status === 'submitted_on_time' || assignment.status === 'submitted_late') && ( <button onClick={() => handleAdminApproveTaskCompletion(assignment.taskId, assignment.personId)} className="btn-success text-sm">Approve Completion</button> )}
+                          {assignment.status === 'pending_acceptance' && assignment.personId === currentUser.id && ( <> <button onClick={() => handleUserAcceptTask(assignment.id)} className="btn-success text-sm">Accept</button> <button onClick={() => handleUserDeclineTask(assignment.id)} className="btn-danger text-sm">Decline</button> </> )}
+                          {assignment.status === 'accepted_by_user' && assignment.personId === currentUser.id && ( <> {isLate && assignmentToSubmitDelayReason !== assignment.id && ( <button onClick={() => setAssignmentToSubmitDelayReason(assignment.id)} className="btn-warning text-sm">Submit Late</button> )} {assignmentToSubmitDelayReason === assignment.id && isLate && ( <div className="w-full space-y-2 my-2 p-2 border border-warning bg-yellow-50"> <FormTextarea label="Reason for Late Submission:" id={`delayReason-${assignment.id}`} value={userSubmissionDelayReason} onChange={e => setUserSubmissionDelayReason(e.target.value)} /> <button onClick={() => handleUserSubmitTask(assignment.id, userSubmissionDelayReason)} className="btn-primary text-sm">Confirm</button> <button onClick={() => { setAssignmentToSubmitDelayReason(null); setUserSubmissionDelayReason(''); }} className="btn-neutral text-sm ml-2">Cancel</button> </div> )} {!isLate && ( <button onClick={() => handleUserSubmitTask(assignment.id)} className="btn-primary text-sm">Mark Completed</button> )} </> )}
+                          {currentUser.role === 'admin' && (assignment.status === 'submitted_on_time' || assignment.status === 'submitted_late') && ( <button onClick={() => handleAdminApproveTaskCompletion(assignment.id)} className="btn-success text-sm">Approve Completion</button> )}
                         </div> </li> );
                   })} </ul> )}
           </div>
