@@ -78,7 +78,7 @@ export const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = (
           </button>
         </div>
         <footer className="text-center py-6 text-sm text-neutral mt-auto">
-          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by Shaik Mohammed Nawaz.</p>
+          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by AI.</p>
         </footer>
       </div>
     );
@@ -99,7 +99,7 @@ export const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = (
           </button>
         </div>
         <footer className="text-center py-6 text-sm text-neutral mt-auto">
-          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by Shaik Mohammed Nawaz.</p>
+          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by AI.</p>
         </footer>
       </div>
     );
@@ -207,7 +207,7 @@ export const PreRegistrationFormPage: React.FC<PreRegistrationFormPageProps> = (
         </p>
       </div>
       <footer className="text-center py-6 text-sm text-neutral mt-auto">
-        <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by Shaik Mohammed Nawaz.</p>
+        <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by AI.</p>
       </footer>
     </div>
   );

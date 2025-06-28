@@ -60,8 +60,7 @@ export interface Task {
 }
 
 export interface Assignment {
-  id: string; // Unique identifier for the assignment itself
-  taskId: string | Task; // Can be a string or a populated Task object from the backend
+  taskId: string;
   personId: string; // User.id of the assigned person
   taskTitle: string;
   personName: string; // User.displayName of the assigned person
