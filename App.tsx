@@ -1479,22 +1479,40 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
           </div>
         )}
 
-        {currentPage === Page.AssignWork && currentUser.role === 'admin' && (
-          <div className="space-y-6">
-            <h2 className="text-2xl font-semibold text-primary mb-6">Assign Work (Organization: {currentUser.organizationId})</h2>
-            <div className="bg-surface p-6 rounded-lg shadow-md">
-              <FormSelect label="Select Task" id="selectTaskForAssignment" value={selectedTaskForAssignment || ''} onChange={e => { setSelectedTaskForAssignment(e.target.value); setAssignmentSuggestion(null); clearMessages(); }}> <option value="">-- Select Task --</option> {tasks.map(t => (<option key={t.id} value={t.id}>{t.title}</option>))} </FormSelect>
-              {selectedTaskForAssignment && ( <div className="mt-4 p-3 bg-bground rounded"> <h4 className="font-medium text-textlight">Selected Task:</h4> <p className="text-sm text-neutral">{tasks.find(t=>t.id === selectedTaskForAssignment)?.description}</p> <p className="text-xs text-neutral">Skills: {tasks.find(t=>t.id === selectedTaskForAssignment)?.requiredSkills}</p> {tasks.find(t=>t.id === selectedTaskForAssignment)?.deadline && <p className="text-xs">Deadline: {new Date(tasks.find(t=>t.id === selectedTaskForAssignment)!.deadline!).toLocaleDateString()}</p>} </div> )}
-              <button onClick={handleGetAssignmentSuggestion} className="btn-accent mt-4 flex items-center" disabled={!selectedTaskForAssignment || isLoadingSuggestion}> {isLoadingSuggestion ? <LoadingSpinner /> : <><LightBulbIcon className="w-5 h-5 mr-2"/>AI Suggestion</>} </button>
-              {assignmentSuggestion && ( <div className={`mt-4 p-3 rounded shadow-sm ${assignmentSuggestion.suggestedPersonName ? 'bg-green-50' : 'bg-yellow-50'}`}> <p className="text-sm font-medium">{assignmentSuggestion.suggestedPersonName ? `Suggests: ${assignmentSuggestion.suggestedPersonName}` : "AI:"}</p> <p className="text-xs text-neutral">{assignmentSuggestion.justification}</p> </div> )}
-              <form onSubmit={(e) => handleAssignTask(e, assignmentSuggestion?.suggestedPersonName)} className="mt-6 space-y-4">
-                <FormSelect label="Assign to" id="assignPerson" name="assignPerson" required defaultValue={assignmentSuggestion?.suggestedPersonName ? users.find(u => u.displayName === assignmentSuggestion.suggestedPersonName)?.id : ""}> <option value="">-- Select Person --</option> {users.filter(u => u.role === 'user' && !assignments.some(a => a.taskId === selectedTaskForAssignment && a.personId === u.id && (a.status === 'pending_acceptance' || a.status === 'accepted_by_user'))).map(user => ( <option key={user.id} value={user.id}>{user.displayName} ({user.position})</option>))} </FormSelect>
-                <FormInput label="Specific Deadline (Optional)" id="specificDeadline" name="specificDeadline" type="date" value={assignmentForm.specificDeadline} onChange={e => setAssignmentForm({...assignmentForm, specificDeadline: e.target.value})} />
-                <button type="submit" className="btn-primary" disabled={!selectedTaskForAssignment}>Assign Task</button>
-              </form>
-            </div>
-          </div>
-        )}
+        {currentPage === Page.AssignWork && currentUser.role === 'admin' && (() => {
+            const usersAvailableForAssignment = users.filter(u => {
+              if (u.role !== 'user') return false;
+              // A user is unavailable if they have ANY task that is currently pending their acceptance or is accepted by them.
+              const isBusy = assignments.some(a => a.personId === u.id && (a.status === 'pending_acceptance' || a.status === 'accepted_by_user'));
+              return !isBusy;
+            });
+
+            return (
+              <div className="space-y-6">
+                <h2 className="text-2xl font-semibold text-primary mb-6">Assign Work (Organization: {currentUser.organizationId})</h2>
+                <div className="bg-surface p-6 rounded-lg shadow-md">
+                  <FormSelect label="1. Select Task to Assign" id="selectTaskForAssignment" value={selectedTaskForAssignment || ''} onChange={e => { setSelectedTaskForAssignment(e.target.value); setAssignmentSuggestion(null); clearMessages(); }}> <option value="">-- Choose a task --</option> {tasks.map(t => (<option key={t.id} value={t.id}>{t.title}</option>))} </FormSelect>
+                  {selectedTaskForAssignment && ( <div className="mt-4 p-3 bg-bground rounded"> <h4 className="font-medium text-textlight">Selected Task:</h4> <p className="text-sm text-neutral">{tasks.find(t=>t.id === selectedTaskForAssignment)?.description}</p> <p className="text-xs text-neutral">Skills: {tasks.find(t=>t.id === selectedTaskForAssignment)?.requiredSkills}</p> {tasks.find(t=>t.id === selectedTaskForAssignment)?.deadline && <p className="text-xs">Deadline: {new Date(tasks.find(t=>t.id === selectedTaskForAssignment)!.deadline!).toLocaleDateString()}</p>} </div> )}
+                  
+                  <h3 className="text-lg font-medium text-textlight mt-6">2. Get AI Suggestion (Recommended)</h3>
+                  <button onClick={handleGetAssignmentSuggestion} className="btn-accent mt-2 flex items-center" disabled={!selectedTaskForAssignment || isLoadingSuggestion}> {isLoadingSuggestion ? <LoadingSpinner /> : <><LightBulbIcon className="w-5 h-5 mr-2"/>Get AI Suggestion</>} </button>
+                  {assignmentSuggestion && ( <div className={`mt-4 p-3 rounded shadow-sm ${assignmentSuggestion.suggestedPersonName ? 'bg-green-50' : 'bg-yellow-50'}`}> <p className="text-sm font-medium">{assignmentSuggestion.suggestedPersonName ? `Suggests: ${assignmentSuggestion.suggestedPersonName}` : "AI:"}</p> <p className="text-xs text-neutral">{assignmentSuggestion.justification}</p> </div> )}
+                  
+                  <form onSubmit={(e) => handleAssignTask(e, assignmentSuggestion?.suggestedPersonName)} className="mt-6 space-y-4">
+                    <h3 className="text-lg font-medium text-textlight">3. Assign to Person</h3>
+                    <FormSelect label="Assign to" id="assignPerson" name="assignPerson" required defaultValue={assignmentSuggestion?.suggestedPersonName ? users.find(u => u.displayName === assignmentSuggestion.suggestedPersonName)?.id : ""}>
+                      <option value="">-- Select Person --</option>
+                      {usersAvailableForAssignment.map(user => (
+                        <option key={user.id} value={user.id}>{user.displayName} ({user.position})</option>
+                      ))}
+                    </FormSelect>
+                    <FormInput label="Specific Deadline (Optional)" id="specificDeadline" name="specificDeadline" type="date" value={assignmentForm.specificDeadline} onChange={e => setAssignmentForm({...assignmentForm, specificDeadline: e.target.value})} />
+                    <button type="submit" className="btn-primary" disabled={!selectedTaskForAssignment}>Assign Task</button>
+                  </form>
+                </div>
+              </div>
+            );
+        })()}
 
         {currentPage === Page.ViewAssignments && (
           <div className="space-y-6">
@@ -1520,11 +1538,28 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
                 <ul className="space-y-4">
                     {tasks.map(task => {
                         const taskAssignments = assignments.filter(a => a.taskId === task.id);
-                        const isFullyAssigned = taskAssignments.some(a => a.status === 'accepted_by_user' || a.status === 'completed_admin_approved' || a.status.startsWith('submitted'));
-                        const isPending = taskAssignments.some(a => a.status === 'pending_acceptance');
-                        let availability = "Available"; let color = "text-success";
-                        if (isFullyAssigned) { availability = "Assigned/In Progress"; color = "text-neutral"; }
-                        else if (isPending) { availability = "Pending Acceptance"; color = "text-warning"; }
+                        const relevantAssignments = taskAssignments.filter(a => a.status !== 'declined_by_user');
+                        let availability: string;
+                        let color: string;
+
+                        if (relevantAssignments.length === 0) {
+                            availability = "Available";
+                            color = "text-success";
+                        } else if (relevantAssignments.every(a => a.status === 'completed_admin_approved')) {
+                            availability = "Completed";
+                            color = "text-success";
+                        } else if (relevantAssignments.some(a => a.status === 'accepted_by_user' || a.status.startsWith('submitted'))) {
+                            availability = "In Progress";
+                            color = "text-info";
+                        } else if (relevantAssignments.some(a => a.status === 'pending_acceptance')) {
+                            availability = "Pending Acceptance";
+                            color = "text-warning";
+                        } else {
+                            // Fallback for mixed states (e.g., some completed, some pending)
+                            availability = "In Progress";
+                            color = "text-info";
+                        }
+
                         return ( <li key={task.id} className="bg-surface p-4 rounded-lg shadow-md"> <h3 className="text-lg font-semibold">{task.title}</h3> <p className="text-sm mt-1">{task.description}</p> <p className="text-xs mt-1">Skills: {task.requiredSkills}</p> {task.programName && <p className="text-xs">Program: {task.programName}</p>} {task.deadline && <p className="text-xs">Deadline: {new Date(task.deadline).toLocaleDateString()}</p>} <p className={`text-xs font-medium mt-2 ${color}`}>Status: {availability}</p>
                         {currentUser.role === 'admin' && taskAssignments.length > 0 && ( <div className="mt-2 pt-2 border-t"> <p className="text-xs font-medium">Assignees:</p> <ul className="text-xs list-disc list-inside pl-2"> {taskAssignments.map(a => (<li key={`${a.taskId}-${a.personId}`}>{a.personName} - {a.status.replace(/_/g,' ')}</li>))} </ul> </div> )}
                         </li> );
