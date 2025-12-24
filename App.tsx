@@ -1279,7 +1279,7 @@ const handlePreRegistrationSubmit = async (e: React.FormEvent) => {
           </p>
         </div>
         <footer className="text-center py-6 text-sm text-neutral mt-auto">
-          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by SHAIK MOAHAMMED NAWAZ.</p>
+          <p>&copy; {new Date().getFullYear()} Task Assignment Assistant. Powered by NN.</p>
         </footer>
       </div>
     );
